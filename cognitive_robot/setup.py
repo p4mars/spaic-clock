@@ -26,9 +26,12 @@ setup(
         ],
     },
     entry_points={
-    'console_scripts': [
-        'drive_and_arm = cognitive_robot.drive_and_arm:main',
-        'take_photo = cognitive_robot.take_photo:main',
+        'console_scripts': [
+            # Main service node — runs on the laptop, reads the clock via OCR.
+            'read_time_service = cognitive_robot.read_time_service:main',
+
+            # Debug tool — manually save camera frames to test the OCR offline.
+            'make_photo_for_testing_algorithm = cognitive_robot.make_photo_for_testing_algorithm:main',
         ],
     },
 )

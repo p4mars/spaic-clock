@@ -1,7 +1,12 @@
 """
-take_photo.py
+make_photo_for_testing_algorithm.py
 
-ROS2 node that listens to the robot's gripper camera.
+Debug/testing tool — NOT part of the production pipeline.
+
+ROS2 node that listens to the robot's gripper camera and saves frames
+to disk on demand. Use this to collect sample images for testing or
+tuning the OCR algorithm offline.
+
 Press Enter to save a photo, type 'q' to stop.
 Photos are saved to ~/photos/ as photo_0000.jpg, photo_0001.jpg, ...
 """

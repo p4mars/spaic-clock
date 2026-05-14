@@ -1,0 +1,20 @@
+# ReadTime.srv
+#
+# Service used by the task planner to request a time reading from the
+# digital clock at the current station.
+#
+# The request is intentionally empty: the caller simply triggers the
+# service when the robot is already positioned at the station.
+
+# --- Request (nothing needed) ---
+---
+# --- Response ---
+
+# True when the OCR found a valid NN:NN time string with sufficient
+# confidence; False when all scan iterations failed.
+bool found
+
+# The four digits of the time, left to right.
+# Example: 14:32  →  [1, 4, 3, 2]
+# Empty list when found is False.
+int32[] time_digits

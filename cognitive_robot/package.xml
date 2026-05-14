@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cognitive_robot</name>
+  <version>0.0.0</version>
+  <description>
+    Cognitive robot package for the MIRTE Master.
+    Contains the read_time_service node, which uses EasyOCR to read a
+    digital clock at a station and return the time to the task planner.
+  </description>
+  <maintainer email="mikesmalbroek@hotmail.com">mike</maintainer>
+  <license>TODO: License declaration</license>
+
+  <!-- Core ROS2 Python client library -->
+  <depend>rclpy</depend>
+
+  <!-- Image messages (sensor_msgs/Image) used by the camera subscription -->
+  <depend>sensor_msgs</depend>
+
+  <!-- Twist messages (geometry_msgs/Twist) used to rotate the robot -->
+  <depend>geometry_msgs</depend>
+
+  <!-- cv_bridge converts ROS Image messages to OpenCV (NumPy) arrays -->
+  <depend>cv_bridge</depend>
+
+  <!-- Our custom service definition (ReadTime.srv) -->
+  <depend>cognitive_robot_interfaces</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

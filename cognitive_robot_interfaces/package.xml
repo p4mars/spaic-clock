@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cognitive_robot_interfaces</name>
+  <version>0.0.0</version>
+  <description>
+    Custom ROS2 service definitions for the cognitive_robot package.
+    Contains ReadTime.srv, which lets a task planner request a time
+    reading from a digital clock via OCR.
+  </description>
+  <maintainer email="mikesmalbroek@hotmail.com">mike</maintainer>
+  <license>TODO: License declaration</license>
+
+  <!-- ament_cmake is the standard build tool for ROS2 message/service packages -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- rosidl tools generate the Python/C++ code from the .srv file -->
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <!-- rosidl_default_runtime makes the generated code available at runtime -->
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <!-- Required group membership for any package that defines ROS2 interfaces -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
