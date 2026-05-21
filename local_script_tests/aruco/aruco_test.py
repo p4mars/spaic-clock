@@ -1,68 +1,57 @@
 """
-ArUco Marker Detection Test Script
-Dit script opent je webcam en detecteert ArUco markers in real-time.
-Als een marker wordt gevonden, tekent het groene lijnen eromheen en toont het welk station het is.
+ArUco Marker Detection on a Single Photo
+Detects ArUco markers in a static image and shows which station was found.
 """
 
 import cv2
 from cv2 import aruco
 
 # ===== SETUP =====
-# Laad het ArUco woordenboek (DICT_6X6_250 bevat 250 verschillende marker patronen)
+# Load the ArUco dictionary (DICT_6X6_250 contains 250 different marker patterns)
 dict_ = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
 
-# Maak detector parameters aan (standaard instellingen zijn meestal prima)
+# Create detector parameters (default settings work fine)
 params = aruco.DetectorParameters()
 
-# Maak de ArUco detector aan
+# Create the ArUco detector
 detector = aruco.ArucoDetector(dict_, params)
 
-# Open de webcam (0 = eerste webcam, of /dev/video0 op Linux)
-cap = cv2.VideoCapture(0)
+# ===== LOAD PHOTO =====
+frame = cv2.imread('test_clock.jpg')  # replace with your photo path
 
-print("Webcam geopend. Hou een marker voor de camera.")
-print("Druk op 'q' om te stoppen.")
+# Check if the image loaded successfully
+if frame is None:
+    print("Cannot load photo!")
+    exit()
 
-# ===== MAIN LOOP =====
-while True:
-    # Lees een frame van de webcam
-    ret, frame = cap.read()
-    
-    # Als het lezen mislukt, stop dan
-    if not ret:
-        print("Kon geen frame lezen van webcam")
-        break
-    
-    # ===== DETECTIE =====
-    # Zoek naar ArUco markers in dit frame
-    # corners = lijst met 4 hoekpunten per gevonden marker
-    # ids = lijst met marker IDs (0, 1, 2, etc.)
-    corners, ids, _ = detector.detectMarkers(frame)
-    
-    # ===== ALS ER MARKERS GEVONDEN ZIJN =====
-    if ids is not None:
-        # Teken groene lijnen rond alle gevonden markers
-        aruco.drawDetectedMarkers(frame, corners, ids)
-        
-        # Loop door alle gevonden marker IDs
-        for id_ in ids.flatten():
-            if id_ == 0:
-                # Marker ID 0 = Station A (de klok)
-                cv2.putText(frame, "STATION A GEVONDEN", (50, 50), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            elif id_ == 1:
-                # Marker ID 1 = Station B (de abacus)
-                cv2.putText(frame, "STATION B GEVONDEN", (50, 100), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-    
-    # ===== TOON HET BEELD =====
-    cv2.imshow('ArUco Detectie Test - Druk Q om te stoppen', frame)
-    
-    # Wacht 1ms op toetsdruk. Als 'q' ingedrukt: stop de loop
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+# ===== DETECTION =====
+# Search for ArUco markers in the image
+# corners = list of 4 corner points per detected marker
+# ids = list of marker IDs (0, 1, 2, etc.)
+corners, ids, _ = detector.detectMarkers(frame)
 
-# ===== OPRUIMEN =====
-cap.release()  # Sluit de webcam
-cv2.destroyAllWindows()  # Sluit alle OpenCV vensters
-print("Test gestopt.")
+# ===== RESULT =====
+# Check if any markers were found
+if ids is not None:
+    # Draw green lines around all detected markers
+    aruco.drawDetectedMarkers(frame, corners, ids)
+    
+    # Loop through all detected marker IDs
+    for id_ in ids.flatten():
+        if id_ == 0:
+            # Marker ID 0 = Station A (the clock)
+            cv2.putText(frame, "STATION A FOUND", (50, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            print(f"Station A detected at position: {corners[0]}")
+        elif id_ == 1:
+            # Marker ID 1 = Station B (the abacus)
+            cv2.putText(frame, "STATION B FOUND", (50, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            print(f"Station B detected at position: {corners[0]}")
+else:
+    print("No markers found in the photo")
+
+# ===== SHOW RESULT =====
+cv2.imshow('Detection result - Press any key to close', frame)
+cv2.waitKey(0)  # Wait until you press a key
+cv2.destroyAllWindows()
