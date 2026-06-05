@@ -38,6 +38,9 @@ setup(
 
             # Service node — detects an abacus in the front camera using Roboflow.
             'detect_abacus_service = cognitive_robot.detect_abacus_service:main',
+
+            # Test caller — calls /detect_abacus once and prints the result.
+            'call_detect_abacus = cognitive_robot.call_detect_abacus:main',
         ],
     },
 )

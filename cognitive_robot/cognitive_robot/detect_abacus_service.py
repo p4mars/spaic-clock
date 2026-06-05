@@ -2,7 +2,8 @@
 detect_abacus_service.py
 
 ROS2 service node that detects an abacus in the robot's front camera image
-using the Roboflow serverless inference API.
+using the Roboflow serverless inference API, and measures its distance using
+the depth camera.
 
 HOW IT FITS IN THE SYSTEM
 --------------------------
@@ -12,8 +13,8 @@ The task planner calls the /detect_abacus service (empty request). This node:
   2. Saves it as a temporary JPEG file on disk.
   3. Sends the image to the Roboflow serverless inference API.
   4. Picks the prediction with the highest confidence score.
-  5. Returns detected=True/False, the confidence score, and the pixel
-     coordinates (x, y) of the bounding box centre.
+  5. If the abacus is detected, reads the depth frame and measures distance.
+  6. Returns the confidence, pixel coordinates, bounding box, and distance.
 
 WHY THIS RUNS ON THE LAPTOP (NOT THE ROBOT)
 --------------------------------------------
@@ -23,22 +24,28 @@ an internet connection and the inference_sdk package installed.
 
 TOPICS USED
 -----------
-  /camera/color/image_raw  (subscribe) — front camera from the robot
+  /camera/color/image_raw  (subscribe) — colour camera from the robot
+  /camera/depth/image_raw  (subscribe) — depth camera from the robot
 
 SERVICE PROVIDED
 ----------------
   /detect_abacus  (cognitive_robot_interfaces/srv/DetectAbacus)
       Request  : (empty)
-      Response : confidence (float32)  0.0 means nothing detected
-                 x          (int32)    pixel X of bounding box centre
-                 y          (int32)    pixel Y of bounding box centre
+      Response : confidence  (float32)  0.0 means nothing detected
+                 x           (int32)    pixel X of bounding box centre
+                 y           (int32)    pixel Y of bounding box centre
+                 bbox_width  (int32)    bounding box width in pixels
+                 bbox_height (int32)    bounding box height in pixels
+                 distance_m  (float32)  distance to abacus in metres
 """
 
 import os
 import tempfile
 import threading
+import time
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -81,6 +88,12 @@ class DetectAbacusService(Node):
         # Real robot : /camera/color/image_raw
         # Gazebo     : /camera/image_raw
 
+        self.declare_parameter('depth_topic', '/camera/depth/image_raw')
+        # Raw depth topic from the depth sensor (16UC1, values in mm).
+        # The depth and colour cameras are a few cm apart, causing a small
+        # pixel offset (~20-30 px at 1-2 m). This is acceptable for distance
+        # and orientation estimation — no alignment node needed.
+
         self.declare_parameter('confidence_threshold', 0.7)
         # Minimum Roboflow confidence (0.0–1.0) to count a detection as valid.
         # Detections below this score are ignored and detected=False is returned.
@@ -91,7 +104,7 @@ class DetectAbacusService(Node):
         self.declare_parameter('api_key', '8U4Olre0d5v9lWGCeHHT')
         # Your Roboflow API key. Keep this secret in a production environment.
 
-        self.declare_parameter('model_id', 'abacus_recognition_v1/1')
+        self.declare_parameter('model_id', 'abacus_recognition_v1/2')
         # Roboflow model ID in the format  <project-slug>/<version-number>.
 
         # ------------------------------------------------------------------ #
@@ -126,6 +139,22 @@ class DetectAbacusService(Node):
             callback_group=self._cb_group,
         )
         self.get_logger().info(f'Subscribing to camera on: {camera_topic}')
+
+        # ------------------------------------------------------------------ #
+        # Depth camera subscription                                            #
+        # ------------------------------------------------------------------ #
+        self.latest_depth_frame = None
+        self._depth_frame_lock = threading.Lock()
+
+        depth_topic = self.get_parameter('depth_topic').get_parameter_value().string_value
+        self.create_subscription(
+            Image,
+            depth_topic,
+            self._depth_callback,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.get_logger().info(f'Subscribing to depth on: {depth_topic}')
 
         # ------------------------------------------------------------------ #
         # Roboflow inference client                                            #
@@ -168,6 +197,12 @@ class DetectAbacusService(Node):
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         with self._frame_lock:
             self.latest_frame = frame
+
+    def _depth_callback(self, msg):
+        """Cache the latest aligned depth frame (16UC1, values in mm)."""
+        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+        with self._depth_frame_lock:
+            self.latest_depth_frame = frame
 
     # ---------------------------------------------------------------------- #
     # Base functions                                                           #
@@ -272,16 +307,18 @@ class DetectAbacusService(Node):
 
         Returns
         -------
-        tuple : (float, int, int)
-            (confidence, x, y)
+        tuple : (float, int, int, int, int)
+            (confidence, x, y, bbox_width, bbox_height)
 
-            confidence : Score of the best prediction (0.0 if nothing found).
-            x          : Pixel X of the bounding box centre (0 if confidence 0.0).
-            y          : Pixel Y of the bounding box centre (0 if confidence 0.0).
+            confidence  : Score of the best prediction (0.0 if nothing found).
+            x           : Pixel X of the bounding box centre (0 if confidence 0.0).
+            y           : Pixel Y of the bounding box centre (0 if confidence 0.0).
+            bbox_width  : Bounding box width in pixels (0 if confidence 0.0).
+            bbox_height : Bounding box height in pixels (0 if confidence 0.0).
         """
         if not predictions:
             self.get_logger().info('No predictions returned by the API.')
-            return 0.0, 0, 0
+            return 0.0, 0, 0, 0, 0
 
         # Pick the prediction the model is most certain about.
         best = max(predictions, key=lambda p: p['confidence'])
@@ -293,9 +330,92 @@ class DetectAbacusService(Node):
                 f'Best confidence {best["confidence"]:.2f} is below '
                 f'threshold {threshold:.2f} — returning 0.0.'
             )
-            return 0.0, 0, 0
+            return 0.0, 0, 0, 0, 0
 
-        return float(best['confidence']), int(best['x']), int(best['y'])
+        return (
+            float(best['confidence']),
+            int(best['x']),
+            int(best['y']),
+            int(best['width']),
+            int(best['height']),
+        )
+
+    def _save_depth_image(self, depth_frame, x, y, bbox_width, bbox_height):
+        """
+        Save the depth frame as two images in ~/depth_photos/ when an abacus
+        is detected. Also draws the bounding box so you can see where the
+        abacus was found.
+
+          depth_HHMMSS_raw.png   — grayscale (brighter = further away)
+          depth_HHMMSS_color.png — false colour (blue = close, red = far)
+        """
+        save_dir = os.path.expanduser('~/depth_photos')
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Normalize uint16 (mm) to uint8 (0-255) for saving.
+        normalized = np.zeros(depth_frame.shape, dtype=np.uint8)
+        valid_mask = depth_frame > 0
+        if valid_mask.any():
+            normalized[valid_mask] = cv2.normalize(
+                depth_frame[valid_mask], None, 0, 255, cv2.NORM_MINMAX
+            ).flatten()
+
+        # Draw bounding box on both images so you can see where the abacus is.
+        half_w = bbox_width // 2
+        half_h = bbox_height // 2
+        x1, y1 = x - half_w, y - half_h
+        x2, y2 = x + half_w, y + half_h
+
+        timestamp = time.strftime('%H%M%S')
+
+        raw_img = cv2.cvtColor(normalized, cv2.COLOR_GRAY2BGR)
+        cv2.rectangle(raw_img, (x1, y1), (x2, y2), (255, 255, 255), 2)
+        raw_path = os.path.join(save_dir, f'depth_{timestamp}_raw.png')
+        cv2.imwrite(raw_path, raw_img)
+
+        color_img = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
+        color_img[~valid_mask] = [0, 0, 0]
+        cv2.rectangle(color_img, (x1, y1), (x2, y2), (255, 255, 255), 2)
+        color_path = os.path.join(save_dir, f'depth_{timestamp}_color.png')
+        cv2.imwrite(color_path, color_img)
+
+        self.get_logger().info(f'Depth images saved: {raw_path}, {color_path}')
+
+    def _capture_depth_frame(self):
+        """Return a thread-safe copy of the latest aligned depth frame, or None."""
+        with self._depth_frame_lock:
+            if self.latest_depth_frame is None:
+                return None
+            return self.latest_depth_frame.copy()
+
+    def _sample_depth(self, depth_frame, x, y, radius=5):
+        """
+        Return the median depth in metres around pixel (x, y).
+
+        Uses a small window to filter out invalid (zero) pixels that the
+        depth sensor could not measure. Returns 0.0 when no valid pixels
+        are found in the window.
+
+        Parameters
+        ----------
+        depth_frame : numpy.ndarray  (uint16, values in mm)
+        x, y        : int  pixel coordinates
+        radius      : int  half-size of the sampling window
+
+        Returns
+        -------
+        float  distance in metres, or 0.0 if unmeasurable.
+        """
+        h, w = depth_frame.shape
+        x_min = max(0, x - radius)
+        x_max = min(w, x + radius + 1)
+        y_min = max(0, y - radius)
+        y_max = min(h, y + radius + 1)
+        region = depth_frame[y_min:y_max, x_min:x_max].astype(np.float32)
+        valid = region[region > 0]
+        if len(valid) == 0:
+            return 0.0
+        return float(np.median(valid)) / 1000.0
 
     # ---------------------------------------------------------------------- #
     # Service callback                                                         #
@@ -321,9 +441,12 @@ class DetectAbacusService(Node):
         ----------
         request  : DetectAbacus.Request   (empty — no fields)
         response : DetectAbacus.Response
-            confidence : float32  (0.0 means nothing detected)
-            x          : int32    (bounding box centre X, pixels)
-            y          : int32    (bounding box centre Y, pixels)
+            confidence  : float32  (0.0 means nothing detected)
+            x           : int32    (bounding box centre X, pixels)
+            y           : int32    (bounding box centre Y, pixels)
+            bbox_width  : int32    (bounding box width, pixels)
+            bbox_height : int32    (bounding box height, pixels)
+            distance_m  : float32  (distance to abacus in metres)
 
         Returns
         -------
@@ -335,9 +458,12 @@ class DetectAbacusService(Node):
         frame = self._capture_frame()
         if frame is None:
             self.get_logger().warn('No camera frame available yet — returning confidence=0.0.')
-            response.confidence = 0.0
-            response.x          = 0
-            response.y          = 0
+            response.confidence  = 0.0
+            response.x           = 0
+            response.y           = 0
+            response.bbox_width  = 0
+            response.bbox_height = 0
+            response.distance_m  = 0.0
             return response
 
         # Step 2: save the frame as a temporary JPEG so the API can read it.
@@ -347,15 +473,30 @@ class DetectAbacusService(Node):
         predictions = self._run_inference(image_path)
 
         # Step 4: extract the highest-confidence detection.
-        confidence, x, y = self._extract_best_detection(predictions)
+        confidence, x, y, bbox_width, bbox_height = self._extract_best_detection(predictions)
 
-        # Step 5: fill in the service response.
-        response.confidence = confidence
-        response.x          = x
-        response.y          = y
+        # Step 5: fill detection fields (depth fields default to 0.0).
+        response.confidence  = confidence
+        response.x           = x
+        response.y           = y
+        response.bbox_width  = bbox_width
+        response.bbox_height = bbox_height
+        response.distance_m  = 0.0
+
+        if confidence == 0.0:
+            return response
+
+        # Step 6: measure distance from the depth frame.
+        depth_frame = self._capture_depth_frame()
+        if depth_frame is not None:
+            response.distance_m = self._sample_depth(depth_frame, x, y)
+            self._save_depth_image(depth_frame, x, y, bbox_width, bbox_height)
+        else:
+            self.get_logger().warn('No depth frame available — distance not measured.')
 
         self.get_logger().info(
-            f'Result — confidence={confidence:.2f}, x={x}, y={y}'
+            f'Result — confidence={confidence:.2f}, x={x}, y={y}, '
+            f'distance={response.distance_m:.2f}m'
         )
         return response
 
