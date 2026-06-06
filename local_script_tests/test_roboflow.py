@@ -23,7 +23,7 @@ from inference_sdk import InferenceHTTPClient
 
 API_URL   = 'https://serverless.roboflow.com'
 API_KEY   = '8U4Olre0d5v9lWGCeHHT'
-MODEL_ID  = 'abacus_recognition_v1/1'
+MODEL_ID  = 'abacus_recognition_v1/2'
 
 
 def main():
@@ -37,6 +37,7 @@ def main():
     print('Bezig met versturen naar Roboflow...\n')
 
     client = InferenceHTTPClient(api_url=API_URL, api_key=API_KEY)
+    client.select_api_v0()  # skip localhost:9001 check, go straight to cloud
     result = client.infer(image_path, model_id=MODEL_ID)
     predictions = result.get('predictions', [])
 
