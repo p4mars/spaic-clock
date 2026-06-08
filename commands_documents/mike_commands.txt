@@ -1,0 +1,205 @@
+================================================================================
+  MIRTE MASTER — SLAM COMMAND REFERENCE (MIKE'S LAPTOP)
+================================================================================
+  Workspace : ~/ros2_ws
+  Source elk terminal:
+    source /opt/ros/humble/setup.bash
+    source ~/ros2_ws/install/setup.bash
+
+  ROS_DOMAIN_ID voor echte robot: export ROS_DOMAIN_ID=4
+================================================================================
+
+
+
+
+================================================================================
+  SECTION 1: GAZEBO SIMULATIE
+================================================================================
+  Alles op je LAPTOP, elk in een aparte terminal.
+  Volgorde: Gazebo → SLAM → RViz
+
+  Elke terminal eerst:
+    source /opt/ros/humble/setup.bash
+    source ~/ros2_ws/install/setup.bash
+--------------------------------------------------------------------------------
+
+--- Terminal 1: Gazebo ---
+ros2 launch mirte_gazebo gazebo_mirte_master_empty.launch.xml
+
+--- Terminal 2: SLAM Toolbox ---
+ros2 launch slam_toolbox online_async_launch.py \
+  slam_params_file:=/home/mike/ros2_ws/src/slam_toolbox/config/mapper_params_online_async.yaml \
+  use_sim_time:=true
+
+--- Terminal 3: RViz ---
+rviz2
+
+--- Terminal 4: Teleoperation ---
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+
+--- Terminal 5: Kaart opslaan ---
+ros2 run nav2_map_server map_saver_cli -f ~/ros2_ws/src/cognitive_robot/maps/my_map
+
+================================================================================
+
+
+
+
+================================================================================
+  SECTION 2: ECHTE ROBOT
+================================================================================
+  [LAPTOP] = op je laptop
+  [ROBOT]  = via SSH op de robot
+
+  Verbinding:
+    WiFi:    Mirte-XXXXXX  (wachtwoord: mirte_mirte)
+    Browser: http://192.168.42.1:8000  (mirte / mirte_mirte)
+    SSH:     ssh mirte@172.20.10.4
+
+  Elke LAPTOP terminal eerst:
+    source /opt/ros/humble/setup.bash
+    source ~/ros2_ws/install/setup.bash
+    export ROS_DOMAIN_ID=4
+
+  Elke ROBOT terminal eerst:
+    source /opt/ros/humble/setup.bash
+    export ROS_DOMAIN_ID=4
+--------------------------------------------------------------------------------
+
+--- [ROBOT] Terminal 1: Controleer topics ---
+ros2 topic list
+  # Verwacht: /scan, /mirte_base_controller/cmd_vel, /mirte_base_controller/odom
+  # Leeg? Verkeerd ROS_DOMAIN_ID of WiFi niet verbonden.
+  # Nodes stuk? Herstart ROS service:
+  sudo service mirte-ros restart   (wachtwoord: mirte_mirte)
+
+--- [LAPTOP] Terminal 2: SLAM Toolbox ---
+ros2 launch slam_toolbox online_async_launch.py \
+  slam_params_file:=/home/mike/ros2_ws/src/slam_toolbox/config/mapper_params_online_async.yaml \
+  use_sim_time:=false
+
+--- [LAPTOP] Terminal 3: RViz ---
+rviz2
+  # Fixed Frame → "map"
+  # Voeg toe: Map (/map), LaserScan (/scan), RobotModel
+
+--- [LAPTOP] Terminal 4: Besturen ---
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+  --ros-args -r /cmd_vel:=/mirte_base_controller/cmd_vel
+
+--- [LAPTOP] Terminal 5: Kaart opslaan ---
+ros2 run nav2_map_server map_saver_cli -f ~/ros2_ws/src/cognitive_robot/maps/my_map
+
+================================================================================
+
+
+
+
+================================================================================
+  SECTION 3: PERCEPTION SERVICES (cognitive_robot)
+================================================================================
+
+--- [LAPTOP] Terminal: Alle services starten ---
+ros2 launch cognitive_robot demo.launch.py
+
+--- [LAPTOP] Terminal: Station mapper (camera window + keyboard) ---
+ros2 run cognitive_robot trial_depth
+  # B: detecteer station + sla locatie op (vereist SLAM)
+  # N: detecteer abacus
+  # W/S: voor/achteruit   A/D: links/rechts   Q/E: draaien
+  # X: stop   V: kaart opslaan + afsluiten   ESC: afsluiten
+
+--- [LAPTOP] Handmatig een service aanroepen ---
+ros2 service call /detect_station cognitive_robot_interfaces/srv/DetectStation '{}'
+ros2 service call /detect_abacus cognitive_robot_interfaces/srv/DetectAbacus '{}'
+ros2 service call /read_time cognitive_robot_interfaces/srv/ReadTime '{}'
+
+================================================================================
+
+
+
+
+================================================================================
+  SECTION 4: GAZEBO — NAV2 NAVIGATIE
+================================================================================
+  Stop SLAM eerst. Vereist een bestaande kaart.
+
+  Elke terminal eerst:
+    source /opt/ros/humble/setup.bash
+    source ~/ros2_ws/install/setup.bash
+--------------------------------------------------------------------------------
+
+--- Terminal 1: Gazebo + Nav2 + RViz ---
+ros2 launch spatial_ai_navigation spatial_ai_navigation.launch.py \
+  map:=/home/mike/ros2_ws/src/cognitive_robot/maps/my_map.yaml
+
+--- Na het starten: initiële positie instellen in RViz ---
+  1. Klik "2D Pose Estimate"
+  2. Klik op de kaart waar de robot staat
+  3. Sleep in de richting de robot op kijkt
+
+--- Navigatiedoel via commandoregel ---
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{
+  pose: {
+    header: {frame_id: 'map'},
+    pose: {
+      position: {x: 1.0, y: 2.0, z: 0.0},
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    }
+  },
+  behavior_tree: ''
+}" --feedback
+
+================================================================================
+
+
+
+
+================================================================================
+  SECTION 5: ECHTE ROBOT — NAV2 NAVIGATIE
+================================================================================
+  Stop SLAM en Teleop eerst. Houd RViz open.
+
+  Kaart naar robot kopiëren (eenmalig):
+    scp ~/ros2_ws/src/cognitive_robot/maps/my_map.yaml mirte@172.20.10.4:/home/mirte/
+    scp ~/ros2_ws/src/cognitive_robot/maps/my_map.pgm  mirte@172.20.10.4:/home/mirte/
+--------------------------------------------------------------------------------
+
+--- [ROBOT] Terminal 1: Nav2 starten ---
+ros2 launch mirte_navigation minimal_navigation_launch.py
+
+--- [LAPTOP] Initiële positie instellen in RViz ---
+  1. Klik "2D Pose Estimate"
+  2. Klik op de kaart waar de robot staat
+  3. Sleep in de richting de robot op kijkt
+
+--- [LAPTOP] Navigatiedoel via commandoregel ---
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{
+  pose: {
+    header: {frame_id: 'map'},
+    pose: {
+      position: {x: 1.0, y: 2.0, z: 0.0},
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    }
+  },
+  behavior_tree: ''
+}" --feedback
+
+================================================================================
+
+
+
+
+================================================================================
+  SECTION 6: HANDIGE DEBUG COMMANDO'S
+================================================================================
+
+  Alle actieve topics:              ros2 topic list
+  Laserscan controleren:            ros2 topic echo /scan --once
+  Odometrie controleren:            ros2 topic echo /mirte_base_controller/odom --once
+  cmd_vel controleren (rijdend):    ros2 topic echo /mirte_base_controller/cmd_vel
+  TF-boom bekijken (→ frames.pdf):  ros2 run tf2_tools view_frames
+  Specifieke TF controleren:        ros2 run tf2_ros tf2_echo map camera_depth_optical_frame
+  Camera topics:                    ros2 topic list | grep camera
+
+================================================================================
