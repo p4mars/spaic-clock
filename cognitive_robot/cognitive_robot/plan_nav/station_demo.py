@@ -11,6 +11,7 @@ from rclpy.action import ActionClient
 
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import PoseWithCovarianceStamped
 
 from cognitive_robot_interfaces.srv import ReadTime, DetectAbacus
 
@@ -32,6 +33,11 @@ DETECT_ABACUS_SERVICE_NAME = "/detect_abacus"
 
 # Maximum time to wait for the /detect_abacus service to appear.
 DETECT_ABACUS_SERVICE_WAIT_TIMEOUT_SEC = 10.0
+
+# Retry parameters for send_goal_and_wait (Nav2 may reject the first goal if
+# the planner is still finishing activation right after the pose estimate is set).
+MAX_GOAL_RETRIES = 5
+GOAL_RETRY_DELAY_SEC = 2.0
 
 # Give the robot/camera a moment to stop vibrating after Nav2 reaches Station A.
 SETTLE_AT_STATION_A_SEC = 1.0
@@ -128,6 +134,14 @@ class StationClockMission(Node):
         self.declare_parameter('station_dir', _HERE)
         self.station_dir = self.get_parameter('station_dir').get_parameter_value().string_value
 
+        self._initial_pose_received = False
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            '/initialpose',
+            self._on_initial_pose,
+            10,
+        )
+
         self.nav_client = ActionClient(
             self,
             NavigateToPose,
@@ -143,6 +157,24 @@ class StationClockMission(Node):
             DetectAbacus,
             DETECT_ABACUS_SERVICE_NAME
         )
+
+    # ---------------------------------------------------------------------- #
+    # Initial pose gate
+    # ---------------------------------------------------------------------- #
+
+    def _on_initial_pose(self, msg):
+        if not self._initial_pose_received:
+            self._initial_pose_received = True
+            self.get_logger().info("2D pose estimate received.")
+
+    def wait_for_initial_pose(self):
+        self.get_logger().info(
+            "Waiting for 2D pose estimate — "
+            "click '2D Pose Estimate' in RViz and click on the map where the robot is."
+        )
+        while rclpy.ok() and not self._initial_pose_received:
+            rclpy.spin_once(self, timeout_sec=0.1)
+        self.get_logger().info("Pose set. Starting mission.")
 
     # ---------------------------------------------------------------------- #
     # Nav2 helpers
@@ -184,20 +216,29 @@ class StationClockMission(Node):
         self.get_logger().info(f"yaw   : {math.degrees(yaw):+.1f} deg")
         self.get_logger().info("=" * 70)
 
-        send_goal_future = self.nav_client.send_goal_async(
-            goal_msg,
-            feedback_callback=self.feedback_callback
-        )
+        goal_handle = None
+        for attempt in range(1, MAX_GOAL_RETRIES + 1):
+            send_goal_future = self.nav_client.send_goal_async(
+                goal_msg,
+                feedback_callback=self.feedback_callback
+            )
+            rclpy.spin_until_future_complete(self, send_goal_future)
+            goal_handle = send_goal_future.result()
 
-        rclpy.spin_until_future_complete(self, send_goal_future)
-        goal_handle = send_goal_future.result()
+            if goal_handle is not None and goal_handle.accepted:
+                break
 
-        if goal_handle is None:
-            self.get_logger().error("Goal handle is None. Failed to send goal.")
-            return False
-
-        if not goal_handle.accepted:
-            self.get_logger().error(f"Goal to {station_name} was rejected by Nav2.")
+            self.get_logger().warn(
+                f"Goal to {station_name} rejected "
+                f"(attempt {attempt}/{MAX_GOAL_RETRIES}). "
+                f"Retrying in {GOAL_RETRY_DELAY_SEC:.0f} s..."
+            )
+            if attempt < MAX_GOAL_RETRIES:
+                time.sleep(GOAL_RETRY_DELAY_SEC)
+        else:
+            self.get_logger().error(
+                f"Goal to {station_name} rejected after {MAX_GOAL_RETRIES} attempts."
+            )
             return False
 
         self.get_logger().info(f"Goal to {station_name} accepted.")
@@ -386,6 +427,7 @@ def main(args=None):
         mission.get_logger().info(f"  Station B : {station_b_source}")
 
         mission.wait_for_nav2()
+        mission.wait_for_initial_pose()
 
         if not mission.wait_for_read_time_service():
             return

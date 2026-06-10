@@ -4,9 +4,12 @@ phase2_gazebo.launch.py
 Phase 2 — Gazebo: Autonomous navigation to stations.
 
 What this starts (all on the laptop):
-  - spatial_ai_navigation : Gazebo + Nav2 + RViz (all-in-one)
-  - CV perception nodes   : detect_abacus, detect_station, read_time
-  - station_demo          : autonomous mission (Station A → read clock → Station B)
+  - Gazebo              : same empty world as phase 1
+  - Nav2                : localisation (AMCL) against the saved map + path planning
+  - RViz                : Nav2 view — set the 2D Pose Estimate here before the robot moves
+  - CV perception nodes : detect_abacus, detect_station, read_time
+  - station_demo        : autonomous mission (Station A → read clock → Station B)
+                          waits for the 2D pose estimate before driving
 
 Before running:
   - Phase 1 Gazebo must be complete — station_a_location.yaml and
@@ -21,6 +24,7 @@ To use a different map:
     ros2 launch cognitive_robot phase2_gazebo.launch.py map:=/full/path/to/map.yaml
 
 After launch:
+  - Wait for RViz and Gazebo to load.
   - In RViz click "2D Pose Estimate", click where the robot is on the map,
     and drag in the direction it is facing.
   - station_demo will then drive to Station A, read the clock, and go to Station B.
@@ -28,8 +32,13 @@ After launch:
 
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetEnvironmentVariable, ExecuteProcess
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import (
+    IncludeLaunchDescription, DeclareLaunchArgument,
+    SetEnvironmentVariable, ExecuteProcess,
+)
+from launch.launch_description_sources import (
+    PythonLaunchDescriptionSource, AnyLaunchDescriptionSource,
+)
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -37,6 +46,8 @@ from ament_index_python.packages import get_package_share_directory
 MAPS_DIR    = os.path.expanduser('~/mirte_ws/src/cognitive-robot/maps')
 DEFAULT_MAP = os.path.join(MAPS_DIR, 'auto_map.yaml')
 MODELS_DIR  = os.path.expanduser('~/mirte_ws/src/cognitive-robot/gazebo_map_load')
+CONFIG_DIR  = os.path.expanduser('~/mirte_ws/src/cognitive-robot/config')
+NAV2_PARAMS = os.path.join(CONFIG_DIR, 'nav2_params_mirte.yaml')
 
 CAMERA_TOPIC      = '/camera/image_raw'
 DEPTH_TOPIC       = '/camera/depth/image_raw'
@@ -45,7 +56,8 @@ CMD_VEL_TOPIC     = '/mirte_base_controller/cmd_vel_unstamped'
 
 
 def generate_launch_description():
-    nav_share = get_package_share_directory('spatial_ai_navigation')
+    gazebo_share = get_package_share_directory('mirte_gazebo')
+    nav2_share   = get_package_share_directory('nav2_bringup')
 
     return LaunchDescription([
 
@@ -61,14 +73,35 @@ def generate_launch_description():
             description='Full path to the saved map YAML file',
         ),
 
-        # Gazebo + Nav2 + RViz — all bundled in spatial_ai_navigation
+        # Gazebo simulation — same empty world as phase 1
+        IncludeLaunchDescription(
+            AnyLaunchDescriptionSource(
+                os.path.join(gazebo_share, 'launch', 'gazebo_mirte_master_empty.launch.xml')
+            ),
+        ),
+
+        # Nav2 — localisation (AMCL) against the saved map, no SLAM
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(nav_share, 'launch', 'spatial_ai_navigation.launch.py')
+                os.path.join(nav2_share, 'launch', 'bringup_launch.py')
             ),
             launch_arguments={
-                'map': LaunchConfiguration('map'),
+                'slam':            'False',
+                'map':             LaunchConfiguration('map'),
+                'use_sim_time':    'true',
+                'autostart':       'true',
+                'params_file':     NAV2_PARAMS,
+                'use_composition': 'False',
             }.items(),
+        ),
+
+        # RViz — Nav2 view with 2D Pose Estimate tool
+        ExecuteProcess(
+            cmd=[
+                'rviz2', '-d',
+                os.path.join(nav2_share, 'rviz', 'nav2_default_view.rviz'),
+            ],
+            output='screen',
         ),
 
         # CV perception services (Gazebo camera topics)
@@ -131,7 +164,7 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # Autonomous mission — drive to Station A, read clock, drive to Station B
+        # Autonomous mission — waits for 2D pose estimate, then drives to Station A → B
         Node(
             package='cognitive_robot',
             executable='station_demo',

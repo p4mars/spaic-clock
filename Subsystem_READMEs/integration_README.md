@@ -88,6 +88,10 @@ Saved files go to: `~/mirte_ws/src/cognitive-robot/maps/`
 - SSH into the robot:
   ```bash
   ssh mirte@172.20.10.4
+  or
+  ssh mirte@10.121.167.158
+  or
+  ssh ..
   # password: mirte_mirte
   ```
 - Set domain ID (do this in **every** terminal for real robot):

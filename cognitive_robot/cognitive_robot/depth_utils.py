@@ -188,15 +188,20 @@ class DepthCameraMixin:
                 self.get_logger().warn(
                     f'[DepthMixin] No depth at ({x},{y}) radius={radius} '
                     f'— depth frame has valid pixels elsewhere '
-                    f'(range {int(all_valid.min())}–{int(all_valid.max())} mm, '
-                    f'depth size={depth_frame.shape})'
+                    f'(range {float(all_valid.min()):.3f}–{float(all_valid.max()):.3f}, '
+                    f'dtype={depth_frame.dtype}, depth size={depth_frame.shape})'
                 )
             else:
                 self.get_logger().warn(
                     f'[DepthMixin] No depth at ({x},{y}) — depth frame is entirely zero '
-                    f'(size={depth_frame.shape})'
+                    f'(dtype={depth_frame.dtype}, size={depth_frame.shape})'
                 )
             return 0.0
+
+        # Gazebo's libgazebo_ros_camera publishes depth as float32 in metres.
+        # Real sensors (e.g. RealSense, Orbbec) publish uint16 in millimetres.
+        if depth_frame.dtype == np.float32:
+            return float(np.median(valid))
         return float(np.median(valid)) / 1000.0
 
     def _project_to_3d(self, pixel_x, pixel_y, distance_m):

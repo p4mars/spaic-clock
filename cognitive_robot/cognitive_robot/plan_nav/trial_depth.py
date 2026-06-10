@@ -12,6 +12,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
+from rclpy.time import Time
 
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
@@ -639,7 +640,7 @@ class TrialDepthMapper(Node):
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 self.camera_frame,
-                self.get_clock().now(),
+                Time(),
                 timeout=Duration(seconds=2.0)
             )
         except Exception as e:
@@ -745,7 +746,7 @@ raw_detection_in_camera_frame:
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 self.camera_frame,
-                self.get_clock().now(),
+                Time(),
                 timeout=Duration(seconds=2.0)
             )
 
@@ -898,7 +899,10 @@ raw_detection_in_camera_frame:
             "nav2_map_server",
             "map_saver_cli",
             "-f",
-            map_base
+            map_base,
+            "--ros-args",
+            "-p", "use_sim_time:=true",
+            "-p", "save_map_timeout:=10.0",
         ]
 
         try:
@@ -907,7 +911,7 @@ raw_detection_in_camera_frame:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=20
+                timeout=30
             )
 
             if result.stdout:

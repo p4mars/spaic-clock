@@ -4,28 +4,30 @@ phase2_real.launch.py
 Phase 2 — Real Robot: Autonomous navigation to stations.
 
 What this starts (all on the laptop):
-  - Nav2 stack          : map server, AMCL localisation, planner, controller
+  - Nav2                : AMCL localisation against the saved map + path planning
+  - TF relays           : base_link→base_footprint and base_link→base_frame
+  - Topic relays        : /cmd_vel→/mirte_base_controller/cmd_vel and
+                          /mirte_base_controller/odom→/odom
   - RViz                : set the 2D pose estimate here before the mission starts
   - CV perception nodes : detect_abacus, detect_station, read_time
   - station_demo        : autonomous mission (Station A → read clock → Station B)
-
-Note: the SLAM&NAV_README.md originally suggested running Nav2 on the robot
-([ROBOT] terminal). We run it here on the laptop instead — Nav2 nodes
-communicate with the robot over ROS_DOMAIN_ID=4, the same way SLAM does in
-Phase 1. If this causes issues, fall back to: ssh into the robot and run
-  ros2 launch mirte_navigation minimal_navigation_launch.py
+                          waits for the 2D pose estimate before driving
 
 Before running:
-  1. Phase 1 must be complete — station_a_location.yaml and
-     station_b_location.yaml must exist in:
+  1. Phase 1 must be complete — auto_map.yaml, station_a_location.yaml,
+     station_b_location.yaml (and optionally abacus_location.yaml) must exist in:
        ~/mirte_ws/src/cognitive-robot/maps/
   2. Connect laptop WiFi to Mirte-XXXXXX  (password: mirte_mirte)
   3. Place the robot somewhere on the saved map.
   4. Build and source:
-       cd ~/mirte_ws && colcon build && source install/setup.bash
+       cd ~/mirte_ws && colcon build --packages-select cognitive_robot
+       source install/setup.bash
 
 Run with:
     ros2 launch cognitive_robot phase2_real.launch.py
+
+To use a different map:
+    ros2 launch cognitive_robot phase2_real.launch.py map:=/full/path/to/map.yaml
 
 After launch:
   - In RViz click "2D Pose Estimate", click where the robot is on the map,
@@ -36,34 +38,87 @@ After launch:
 
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, ExecuteProcess, SetEnvironmentVariable
+from launch.actions import (
+    IncludeLaunchDescription, DeclareLaunchArgument,
+    SetEnvironmentVariable, ExecuteProcess,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 MAPS_DIR    = os.path.expanduser('~/mirte_ws/src/cognitive-robot/maps')
-RVIZ_CONFIG = os.path.expanduser('~/mirte_ws/src/cognitive-robot/config/mirte_slam.rviz')
+DEFAULT_MAP = os.path.join(MAPS_DIR, 'auto_map.yaml')
+CONFIG_DIR  = os.path.expanduser('~/mirte_ws/src/cognitive-robot/config')
+NAV2_PARAMS = os.path.join(CONFIG_DIR, 'nav2_params_mirte_real.yaml')
 
 
 def generate_launch_description():
-    nav_share = get_package_share_directory('mirte_navigation')
+    nav2_share = get_package_share_directory('nav2_bringup')
 
     return LaunchDescription([
 
         SetEnvironmentVariable('ROS_DOMAIN_ID', '4'),
 
-        # Nav2 stack — map server, AMCL, planner, controller, BT navigator
-        # Uses ~/mirte_ws/src/mirte_navigation/params/minimal_nav2_params.yaml
-        # (map path already configured in that file)
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(nav_share, 'launch', 'minimal_navigation_launch.py')
-            ),
+        DeclareLaunchArgument(
+            'map',
+            default_value=DEFAULT_MAP,
+            description='Full path to the saved map YAML file',
         ),
 
-        # RViz — needed to set the 2D pose estimate before the mission starts
+        # Nav2 — AMCL localisation against the saved map, no SLAM
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(nav2_share, 'launch', 'bringup_launch.py')
+            ),
+            launch_arguments={
+                'slam':            'False',
+                'map':             LaunchConfiguration('map'),
+                'use_sim_time':    'false',
+                'autostart':       'true',
+                'params_file':     NAV2_PARAMS,
+                'use_composition': 'False',
+            }.items(),
+        ),
+
+        # TF: base_link → base_footprint (required by Nav2)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'base_footprint'],
+            output='screen',
+        ),
+
+        # TF: base_link → base_frame (required by some nodes)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'base_frame'],
+            output='screen',
+        ),
+
+        # Relay /cmd_vel (Nav2 output) → /mirte_base_controller/cmd_vel (robot input)
+        Node(
+            package='topic_tools',
+            executable='relay',
+            arguments=['/cmd_vel', '/mirte_base_controller/cmd_vel'],
+            output='screen',
+        ),
+
+        # Relay /mirte_base_controller/odom (robot) → /odom (Nav2 input)
+        Node(
+            package='topic_tools',
+            executable='relay',
+            arguments=['/mirte_base_controller/odom', '/odom'],
+            output='screen',
+        ),
+
+        # RViz — Nav2 view with Map, costmaps, and 2D Pose Estimate tool
         ExecuteProcess(
-            cmd=['rviz2', '-d', RVIZ_CONFIG],
+            cmd=[
+                'rviz2', '-d',
+                os.path.join(nav2_share, 'rviz', 'nav2_default_view.rviz'),
+            ],
             output='screen',
         ),
 
@@ -87,7 +142,7 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # Autonomous mission — drive to Station A, read clock, drive to Station B
+        # Autonomous mission — waits for 2D pose estimate, then drives Station A → B
         Node(
             package='cognitive_robot',
             executable='station_demo',
