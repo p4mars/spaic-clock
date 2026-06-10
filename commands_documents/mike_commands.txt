@@ -129,9 +129,17 @@ ros2 service call /read_time cognitive_robot_interfaces/srv/ReadTime '{}'
     source ~/ros2_ws/install/setup.bash
 --------------------------------------------------------------------------------
 
---- Terminal 1: Gazebo + Nav2 + RViz ---
-ros2 launch spatial_ai_navigation spatial_ai_navigation.launch.py \
-  map:=/home/mike/ros2_ws/src/cognitive_robot/maps/my_map.yaml
+--- Terminal 1: Gazebo ---
+ros2 launch mirte_gazebo gazebo_mirte_master_empty.launch.xml
+
+--- Terminal 2: Nav2 (met kaart) ---
+ros2 launch nav2_bringup bringup_launch.py \
+  use_sim_time:=true \
+  map:=/home/mike/ros2_ws/src/cognitive_robot/maps/my_map.yaml \
+  params_file:=/home/mike/ros2_ws/src/cognitive_robot/config/nav2_params_mirte.yaml
+
+--- Terminal 3: RViz ---
+ros2 launch nav2_bringup rviz_launch.py
 
 --- Na het starten: initiële positie instellen in RViz ---
   1. Klik "2D Pose Estimate"
