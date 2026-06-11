@@ -47,6 +47,9 @@ setup(
 
             # Phase 2 autonomous mission — navigate to Station A, read clock, go to Station B.
             'station_demo = cognitive_robot.plan_nav.station_demo:main',
+
+            # Abacus arm manipulation — service node that moves the arm to place rings.
+            'abacus_manipulation_node = cognitive_robot.abacus_manipulation_node:main',
         ],
     },
 )

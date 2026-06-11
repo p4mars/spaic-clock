@@ -1,0 +1,11 @@
+# RunAbacus.srv
+#
+# Triggers the abacus arm manipulation sequence.
+# The caller provides the four time digits read from the clock at Station A.
+# Example: 14:32 → [1, 4, 3, 2]
+
+# --- Request ---
+int32[] time_digits
+---
+# --- Response ---
+bool success

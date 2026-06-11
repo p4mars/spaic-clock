@@ -13,7 +13,7 @@ from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseWithCovarianceStamped
 
-from cognitive_robot_interfaces.srv import ReadTime, DetectAbacus
+from cognitive_robot_interfaces.srv import ReadTime, DetectAbacus, RunAbacus
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -156,6 +156,11 @@ class StationClockMission(Node):
         self.detect_abacus_client = self.create_client(
             DetectAbacus,
             DETECT_ABACUS_SERVICE_NAME
+        )
+
+        self.run_abacus_client = self.create_client(
+            RunAbacus,
+            '/abacus/run_sequence'
         )
 
     # ---------------------------------------------------------------------- #
@@ -367,6 +372,23 @@ class StationClockMission(Node):
 
         return False
 
+    def call_abacus_manipulation(self, time_digits):
+        self.get_logger().info(f"Calling /abacus/run_sequence with digits: {time_digits}")
+
+        if not self.run_abacus_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error("/abacus/run_sequence service not available. Is abacus_manipulation_node running?")
+            return
+
+        request = RunAbacus.Request()
+        request.time_digits = time_digits
+        future = self.run_abacus_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+
+        if future.result() and future.result().success:
+            self.get_logger().info("Abacus manipulation finished successfully.")
+        else:
+            self.get_logger().error("Abacus manipulation failed or returned no result.")
+
     def call_detect_abacus(self):
         self.get_logger().info("Calling /detect_abacus...")
 
@@ -452,6 +474,10 @@ def main(args=None):
 
         time_found, time_digits = mission.call_read_time()
 
+        if not time_found:
+            mission.get_logger().warn("Clock not detected, defaulting to [0, 0, 0, 0].")
+            time_digits = [0, 0, 0, 0]
+
         if not time_found and not CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND:
             mission.get_logger().error(
                 "Clock detection failed. Stopping mission. "
@@ -471,7 +497,11 @@ def main(args=None):
             mission.get_logger().error("Failed to reach Station B.")
             return
 
-        # 4. Confirm abacus at Station B.
+        # 4. Run abacus arm manipulation with the detected time.
+        mission.get_logger().info(f"Starting abacus manipulation with digits: {time_digits}")
+        mission.call_abacus_manipulation(time_digits)
+
+        # 5. Confirm abacus at Station B.
         abacus_found, _ = mission.call_detect_abacus()
 
         if not abacus_found:
