@@ -451,6 +451,9 @@ def main(args=None):
         mission.wait_for_nav2()
         mission.wait_for_initial_pose()
 
+        mission.get_logger().info("Waiting 5 s for AMCL to stabilise map→odom transform...")
+        time.sleep(5.0)
+
         if not mission.wait_for_read_time_service():
             return
 
