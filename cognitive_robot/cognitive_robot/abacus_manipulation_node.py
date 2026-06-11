@@ -40,10 +40,10 @@ MOVE_SEC = 2
 
 # Shoulder pan angle for each of the four poles, measured from centre
 POLE_PAN_ANGLES = [
-    math.radians(-28),  # pole 1 — far left
-    math.radians(-10),  # pole 2 — slight left
-    math.radians( 10),  # pole 3 — slight right
-    math.radians( 28),  # pole 4 — far right
+    math.radians( 28),  # pole 1 — far left
+    math.radians( 10),  # pole 2 — slight left
+    math.radians(-10),  # pole 3 — slight right
+    math.radians(-28),  # pole 4 — far right
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
