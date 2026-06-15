@@ -85,6 +85,9 @@ def generate_launch_description():
             executable='read_time_service',
             name='read_time_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
 
         # trial_depth — keyboard teleop + station/map saver (Phase 1 main node)

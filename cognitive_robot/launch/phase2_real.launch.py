@@ -113,6 +113,15 @@ def generate_launch_description():
             output='screen',
         ),
 
+        # Republish /odom topic as odom→base_link TF on the laptop.
+        # The robot's own TF publisher is often not discovered over WiFi in time.
+        Node(
+            package='cognitive_robot',
+            executable='odom_tf_broadcaster',
+            name='odom_tf_broadcaster',
+            output='screen',
+        ),
+
         # RViz — Nav2 view with Map, costmaps, and 2D Pose Estimate tool
         ExecuteProcess(
             cmd=[
@@ -140,6 +149,9 @@ def generate_launch_description():
             executable='read_time_service',
             name='read_time_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
 
         # Autonomous mission — waits for 2D pose estimate, then drives Station A → B
