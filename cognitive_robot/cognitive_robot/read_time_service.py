@@ -35,6 +35,7 @@ from datetime import datetime
 
 import cv2
 import easyocr
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Twist
@@ -42,7 +43,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 from cognitive_robot_interfaces.srv import ReadTime
 
@@ -78,7 +79,7 @@ class ReadTimeService(Node):
         self.declare_parameter('rotation_speed', 0.5)
         # Angular speed in rad/s used when rotating the robot.
 
-        self.declare_parameter('confidence_threshold', 0.7)
+        self.declare_parameter('confidence_threshold', 0.1)
         # Minimum EasyOCR confidence (0.0–1.0) to accept a detection.
 
         self.declare_parameter('debug_save_dir', '~/ocr_debug')
@@ -120,8 +121,9 @@ class ReadTimeService(Node):
         # in different threads — we need a lock so they don't corrupt each other.
 
         camera_topic = self.get_parameter('camera_topic').get_parameter_value().string_value
+        msg_type = CompressedImage if camera_topic.endswith('/compressed') else Image
         self.create_subscription(
-            Image,
+            msg_type,
             camera_topic,
             self._camera_callback,
             qos_profile_sensor_data,
@@ -166,18 +168,11 @@ class ReadTimeService(Node):
     # ---------------------------------------------------------------------- #
 
     def _camera_callback(self, msg):
-        """
-        Called automatically by ROS every time a new camera frame arrives.
-
-        Converts the ROS Image message to a BGR OpenCV image and stores it
-        in self.latest_frame so the service callback can use it.
-
-        Parameters
-        ----------
-        msg : sensor_msgs.msg.Image
-            The raw image message published by the robot's front camera.
-        """
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        if isinstance(msg, CompressedImage):
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        else:
+            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         with self._frame_lock:
             self.latest_frame = frame
 
@@ -210,6 +205,23 @@ class ReadTimeService(Node):
         step_deg   = self.get_parameter('step_degrees').get_parameter_value().integer_value
         max_iter   = self.get_parameter('max_iterations').get_parameter_value().integer_value
         threshold  = self.get_parameter('confidence_threshold').get_parameter_value().double_value
+
+        # ------------------------------------------------------------------ #
+        # Wait for the first camera frame before starting the scan            #
+        # ------------------------------------------------------------------ #
+        wait_start = time.time()
+        while True:
+            with self._frame_lock:
+                has_frame = self.latest_frame is not None
+            if has_frame:
+                break
+            if time.time() - wait_start > 30.0:
+                self.get_logger().error('Camera never became available after 30 s — aborting.')
+                response.found = False
+                response.time_digits = []
+                return response
+            self.get_logger().info('Waiting for camera frame...')
+            time.sleep(1.0)
 
         # ------------------------------------------------------------------ #
         # State for this service call                                          #
@@ -371,6 +383,7 @@ class ReadTimeService(Node):
             (True,  [d0, d1, d2, d3])  — exactly one valid match found.
             (False, [])                — zero or multiple matches.
         """
+        print(f"this is what it sees: {results}")
         time_pattern = re.compile(r'^\d{2}:\d{2}$')
         accepted = []
 

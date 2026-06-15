@@ -149,6 +149,9 @@ def generate_launch_description():
             executable='read_time_service',
             name='read_time_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
 
         # Autonomous mission — waits for 2D pose estimate, then drives Station A → B
