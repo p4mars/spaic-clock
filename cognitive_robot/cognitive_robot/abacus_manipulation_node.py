@@ -41,10 +41,10 @@ SHOULDER_LIFT_TRANSIT = -0.8  # shoulder dips to slide ring off onto the pole
 MOVE_SEC = 2
 
 # ── Timing constants (seconds) ────────────────────────────────────────────────
-ARRIVE_WAIT_SEC  = 3.0   # pause after arriving at Station B before starting
-RING_PLACE_SEC   = 3.0   # time at receive position for ring placement
+ARRIVE_WAIT_SEC  = 2.0   # pause after arriving at Station B before starting
+RING_PLACE_SEC   = 2.0   # time at receive position for ring placement
 LOWER_PAUSE_SEC  = 1.5   # pause after lowering to 90° before dipping shoulder
-RELEASE_HOLD_SEC = 2.5   # time held at dipped (release) position
+RELEASE_HOLD_SEC = 1.5   # time held at dipped (release) position
 RETURN_PAUSE_SEC = 1.5   # pause after shoulder returns to working height
 # ─────────────────────────────────────────────────────────────────────────────
 
