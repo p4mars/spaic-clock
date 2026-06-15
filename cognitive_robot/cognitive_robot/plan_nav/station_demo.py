@@ -52,7 +52,7 @@ WAIT_BEFORE_STATION_B_SEC = 1.0
 
 # If False, the robot stops at Station A when OCR fails.
 # If True, it still continues to Station B even when the time was not detected.
-CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND = False
+CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND = True
 
 # Maximum time to wait for the /read_time service to appear.
 READ_TIME_SERVICE_WAIT_TIMEOUT_SEC = 20.0
@@ -490,8 +490,8 @@ def main(args=None):
         time_found, time_digits = mission.call_read_time()
 
         if not time_found:
-            mission.get_logger().warn("Clock not detected, defaulting to [0, 0, 0, 0].")
-            time_digits = [0, 0, 0, 0]
+            mission.get_logger().warn("Clock not detected, defaulting to [1, 2, 0, 1] (12:01).")
+            time_digits = [1, 2, 0, 1]
 
         if not time_found and not CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND:
             mission.get_logger().error(

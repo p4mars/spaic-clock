@@ -141,15 +141,20 @@ def generate_launch_description():
                 'camera_topic': '/camera/color/image_raw/compressed',
             }],
         ),
-        Node(
-            package='cognitive_robot',
-            executable='detect_station_service',
-            name='detect_station_service',
-            output='screen',
-            parameters=[{
-                'camera_topic': '/camera/color/image_raw/compressed',
-            }],
-        ),
+        # TEMP (Phase 2 bandwidth fix): detect_station_service is NOT used in
+        # Phase 2 — station_demo only calls /read_time and /detect_abacus. It was
+        # streaming raw depth (/camera/depth/image_raw) continuously over WiFi and
+        # saturating the link. Disabled to free bandwidth for TF/scan. Re-enable if
+        # Phase 2 ever needs /detect_station again.
+        # Node(
+        #     package='cognitive_robot',
+        #     executable='detect_station_service',
+        #     name='detect_station_service',
+        #     output='screen',
+        #     parameters=[{
+        #         'camera_topic': '/camera/color/image_raw/compressed',
+        #     }],
+        # ),
         Node(
             package='cognitive_robot',
             executable='read_time_service',

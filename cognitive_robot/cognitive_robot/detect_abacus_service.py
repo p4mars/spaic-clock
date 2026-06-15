@@ -158,6 +158,10 @@ class DetectAbacusService(Node, DepthCameraMixin):
         depth_topic       = self.get_parameter('depth_topic').get_parameter_value().string_value
         camera_info_topic = self.get_parameter('camera_info_topic').get_parameter_value().string_value
         self._setup_depth_subscriptions(self._cb_group, depth_topic, camera_info_topic)
+        # Lazy depth: stop the continuous RAW depth stream immediately. It is
+        # re-subscribed only while handling a /detect_abacus request (Station B),
+        # so it never starves the colour camera (e.g. read_time at Station A).
+        self._stop_depth_subscriptions()
 
         # ------------------------------------------------------------------ #
         # Roboflow inference client                                            #
@@ -405,37 +409,50 @@ class DetectAbacusService(Node, DepthCameraMixin):
             return response
 
         # Step 5 & 6: measure depth at the detection centre (via DepthCameraMixin).
-        depth_frame = self._capture_depth_frame()
-        if depth_frame is None:
-            self.get_logger().warn('No depth frame available — distance not measured.')
+        # Lazy depth: subscribe now (depth was NOT streaming during the rest of the
+        # mission, to keep the colour camera alive), wait briefly for a depth frame,
+        # then tear the subscription down again in `finally`.
+        self._start_depth_subscriptions()
+        try:
+            depth_wait_start = time.time()
+            depth_frame = self._capture_depth_frame()
+            while depth_frame is None and time.time() - depth_wait_start < 10.0:
+                self.get_logger().info('Waiting for depth frame...')
+                time.sleep(0.5)
+                depth_frame = self._capture_depth_frame()
+
+            if depth_frame is None:
+                self.get_logger().warn('No depth frame available — distance not measured.')
+                return response
+
+            # Roboflow ran on a 320x240 resized image, so its pixel coordinates are in
+            # that reduced space. The depth image is the original camera resolution.
+            # Scale back so depth sampling and 3D projection use the correct pixel.
+            scale_x = frame.shape[1] / 320.0
+            scale_y = frame.shape[0] / 240.0
+            depth_x = int(x * scale_x)
+            depth_y = int(y * scale_y)
+
+            response.distance_m = self._sample_depth(depth_frame, depth_x, depth_y, radius=30)
+
+            # Step 7: calculate real-world 3D position (via DepthCameraMixin).
+            response.x_m, response.y_m, _ = self._project_to_3d(depth_x, depth_y, response.distance_m)
+
+            # Step 8: save debug depth images.
+            self._save_depth_image(
+                depth_frame, depth_x, depth_y,
+                int(bbox_width * scale_x), int(bbox_height * scale_y),
+                label='abacus',
+            )
+
+            self.get_logger().info(
+                f'Result — confidence={confidence:.2f}, pixel=({x},{y}), '
+                f'distance={response.distance_m:.2f}m, '
+                f'position=({response.x_m:.2f}m, {response.y_m:.2f}m)'
+            )
             return response
-
-        # Roboflow ran on a 320x240 resized image, so its pixel coordinates are in
-        # that reduced space. The depth image is the original camera resolution.
-        # Scale back so depth sampling and 3D projection use the correct pixel.
-        scale_x = frame.shape[1] / 320.0
-        scale_y = frame.shape[0] / 240.0
-        depth_x = int(x * scale_x)
-        depth_y = int(y * scale_y)
-
-        response.distance_m = self._sample_depth(depth_frame, depth_x, depth_y, radius=30)
-
-        # Step 7: calculate real-world 3D position (via DepthCameraMixin).
-        response.x_m, response.y_m, _ = self._project_to_3d(depth_x, depth_y, response.distance_m)
-
-        # Step 8: save debug depth images.
-        self._save_depth_image(
-            depth_frame, depth_x, depth_y,
-            int(bbox_width * scale_x), int(bbox_height * scale_y),
-            label='abacus',
-        )
-
-        self.get_logger().info(
-            f'Result — confidence={confidence:.2f}, pixel=({x},{y}), '
-            f'distance={response.distance_m:.2f}m, '
-            f'position=({response.x_m:.2f}m, {response.y_m:.2f}m)'
-        )
-        return response
+        finally:
+            self._stop_depth_subscriptions()
 
 
 # --------------------------------------------------------------------------- #

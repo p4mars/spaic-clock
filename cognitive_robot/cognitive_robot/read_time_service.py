@@ -215,8 +215,8 @@ class ReadTimeService(Node):
                 has_frame = self.latest_frame is not None
             if has_frame:
                 break
-            if time.time() - wait_start > 30.0:
-                self.get_logger().error('Camera never became available after 30 s — aborting.')
+            if time.time() - wait_start > 120.0:
+                self.get_logger().error('Camera never became available after 120 s — aborting.')
                 response.found = False
                 response.time_digits = []
                 return response

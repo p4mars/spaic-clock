@@ -95,23 +95,49 @@ class DepthCameraMixin:
         self._camera_model_ready = False
         self._camera_info_msg = None  # stored so distortion coefficients are accessible
 
-        self.create_subscription(
-            Image,
-            depth_topic,
-            self._depth_callback,
-            qos_profile_sensor_data,
-            callback_group=cb_group,
-        )
-        self.get_logger().info(f'[DepthMixin] Subscribing to depth on: {depth_topic}')
+        # Stored so the subscriptions can be created/destroyed on demand.
+        # Lazy depth: streaming RAW depth over WiFi continuously saturates the
+        # link and starves the colour camera, so we only subscribe while a
+        # detection is in progress (see _start/_stop_depth_subscriptions).
+        self._depth_cb_group = cb_group
+        self._depth_topic = depth_topic
+        self._camera_info_topic = camera_info_topic
+        self._depth_sub = None
+        self._camera_info_sub = None
 
-        self.create_subscription(
-            CameraInfo,
-            camera_info_topic,
-            self._camera_info_callback,
-            qos_profile_sensor_data,
-            callback_group=cb_group,
-        )
-        self.get_logger().info(f'[DepthMixin] Subscribing to camera_info on: {camera_info_topic}')
+        self._start_depth_subscriptions()
+
+    def _start_depth_subscriptions(self):
+        """Create the depth + camera_info subscriptions if not already active."""
+        if getattr(self, '_depth_sub', None) is None:
+            self._depth_sub = self.create_subscription(
+                Image,
+                self._depth_topic,
+                self._depth_callback,
+                qos_profile_sensor_data,
+                callback_group=self._depth_cb_group,
+            )
+            self.get_logger().info(f'[DepthMixin] Subscribing to depth on: {self._depth_topic}')
+        if getattr(self, '_camera_info_sub', None) is None:
+            self._camera_info_sub = self.create_subscription(
+                CameraInfo,
+                self._camera_info_topic,
+                self._camera_info_callback,
+                qos_profile_sensor_data,
+                callback_group=self._depth_cb_group,
+            )
+            self.get_logger().info(f'[DepthMixin] Subscribing to camera_info on: {self._camera_info_topic}')
+
+    def _stop_depth_subscriptions(self):
+        """Destroy the depth + camera_info subscriptions to free network bandwidth."""
+        if getattr(self, '_depth_sub', None) is not None:
+            self.destroy_subscription(self._depth_sub)
+            self._depth_sub = None
+        if getattr(self, '_camera_info_sub', None) is not None:
+            self.destroy_subscription(self._camera_info_sub)
+            self._camera_info_sub = None
+        with self._depth_frame_lock:
+            self._latest_depth_frame = None
 
     # ---------------------------------------------------------------------- #
     # ROS callbacks                                                            #
