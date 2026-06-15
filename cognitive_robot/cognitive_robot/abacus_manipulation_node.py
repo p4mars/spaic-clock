@@ -4,8 +4,7 @@ abacus_manipulation_node.py
 
 ROS2 service node that controls the MIRTE Master arm to place rings on the
 abacus (Station B).  The master node (station_demo.py) calls /abacus/run_sequence
-with the four time digits read at Station A.  For each ring the arm raises and
-waits for the operator to press Enter before lowering again.
+with the four time digits read at Station A.
 
 Services offered:
     /abacus/run_sequence  (cognitive_robot_interfaces/srv/RunAbacus)
@@ -30,16 +29,24 @@ from builtin_interfaces.msg import Duration
 from cognitive_robot_interfaces.srv import RunAbacus
 
 # ── Joint angle constants — tune these on the real robot (radians) ────────────
-SHOULDER_LIFT_WORK = 0.0    # shoulder lift angle held fixed throughout the sequence
-WRIST_WORK         =  0.0   # wrist angle throughout (kept level)
+SHOULDER_LIFT_WORK    =  0.0   # shoulder lift at working height
+WRIST_WORK            =  0.0   # wrist kept level throughout
 
-ELBOW_TRANSIT      =  0.0   # arm fully upright — safe to rotate between poles
-ELBOW_RECEIVE      = -0.7   # arm slightly raised (~40°) — operator places ring here
-ELBOW_WORK            = -1.57  # elbow 90° forward — hover/working height above pole
-SHOULDER_LIFT_TRANSIT = -0.5  # shoulder briefly dips forward to slide ring off arm
+ELBOW_TRANSIT         =  0.0   # arm fully upright — safe to rotate between poles
+ELBOW_RECEIVE         = -0.7   # arm slightly raised (~40°) — ring is placed here
+ELBOW_WORK            = -1.57  # elbow 90° forward — hover above pole
+SHOULDER_LIFT_TRANSIT = -1.2   # shoulder dips to slide ring off onto the pole
 
 # Seconds the controller has to reach each target position before we move on
 MOVE_SEC = 2
+
+# ── Timing constants (seconds) ────────────────────────────────────────────────
+ARRIVE_WAIT_SEC  = 4.0   # pause after arriving at Station B before starting
+RING_PLACE_SEC   = 4.0   # time at receive position for ring placement
+LOWER_PAUSE_SEC  = 2.5   # pause after lowering to 90° before dipping shoulder
+RELEASE_HOLD_SEC = 4.0   # time held at dipped (release) position
+RETURN_PAUSE_SEC = 2.5   # pause after shoulder returns to working height
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Shoulder pan angle for each of the four poles, measured from centre
 POLE_PAN_ANGLES = [
@@ -48,7 +55,6 @@ POLE_PAN_ANGLES = [
     math.radians(-10),  # pole 3 — slight right
     math.radians(-28),  # pole 4 — far right
 ]
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class AbacusManipulationNode(Node):
@@ -57,9 +63,6 @@ class AbacusManipulationNode(Node):
 
     The sequence is driven by a list of four digits (e.g. [1, 4, 3, 2])
     where each digit is the number of rings to place on the corresponding pole.
-    The shoulder_pan joint rotates to each pole while the elbow stays at a fixed
-    working height.  For every ring the elbow raises, the operator places the
-    ring, presses Enter, and the elbow lowers to push the ring onto the pole.
     """
 
     def __init__(self):
@@ -124,21 +127,21 @@ class AbacusManipulationNode(Node):
         """
         Full ring-placement sequence for one abacus reading.
 
-        For each pole (index 0–3):
-            1. Raise arm to transit position (fully upright).
-            2. Rotate shoulder_pan to the pole's angle while upright.
-            3. Lower arm to working height.
-            4. Repeat <count> times:
-                a. Raise to receive position (slightly up).
-                b. Lower elbow to working height over the pole.
-                c. Dip shoulder so ring slides off onto the pole.
-                d. Return to working height.
-            5. Raise back to transit before moving to next pole.
+        Sequence per ring:
+            1. Receive position (ELBOW_RECEIVE) — wait RING_PLACE_SEC for ring placement.
+            2. Lower to working height (ELBOW_WORK) — pause LOWER_PAUSE_SEC.
+            3. Dip shoulder (SHOULDER_LIFT_TRANSIT) — hold RELEASE_HOLD_SEC.
+            4. Return shoulder to working height — pause RETURN_PAUSE_SEC.
+            5. Repeat from 1 for next ring, or raise to transit for next pole.
 
         Args:
             time_digits: list of four ints, e.g. [1, 4, 3, 2]
         """
         self.get_logger().info(f'Starting abacus sequence — digits: {time_digits}')
+
+        # Wait for alignment after arriving at Station B
+        self.get_logger().info(f'Waiting {ARRIVE_WAIT_SEC:.0f} s for alignment...')
+        time.sleep(ARRIVE_WAIT_SEC)
 
         # Start upright at centre so first rotation is safe
         self._move_arm(0.0, SHOULDER_LIFT_WORK, ELBOW_TRANSIT, WRIST_WORK)
@@ -146,7 +149,7 @@ class AbacusManipulationNode(Node):
         for pole_idx, count in enumerate(time_digits):
             pan = POLE_PAN_ANGLES[pole_idx]
             self.get_logger().info(
-                f'Pole {pole_idx + 1}/4  |  pan={math.degrees(pan):.0f}°  |  rings to place={count}'
+                f'Pole {pole_idx + 1}/4  |  pan={math.degrees(pan):.0f}°  |  rings={count}'
             )
 
             # Rotate to pole while arm is fully upright — avoids knocking poles
@@ -158,18 +161,21 @@ class AbacusManipulationNode(Node):
             for i in range(count):
                 self.get_logger().info(f'  Ring {i + 1}/{count}')
 
-                # Raise to receive position — hold for 5 s so the ring can be placed
+                # Raise to receive position — wait for ring to be placed
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_RECEIVE, WRIST_WORK)
-                time.sleep(5.0)
+                time.sleep(RING_PLACE_SEC)
 
-                # Lower elbow to working height over the pole
+                # Lower to 90° working height above pole — pause so motion is visible
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_WORK, WRIST_WORK)
+                time.sleep(LOWER_PAUSE_SEC)
 
-                # Dip shoulder so ring slides off onto the pole
+                # Dip shoulder to slide ring onto pole — hold so ring settles
                 self._move_arm(pan, SHOULDER_LIFT_TRANSIT, ELBOW_WORK, WRIST_WORK)
+                time.sleep(RELEASE_HOLD_SEC)
 
-                # Return shoulder to working position, ready for the next ring
+                # Return shoulder to working height — pause before next ring
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_WORK, WRIST_WORK)
+                time.sleep(RETURN_PAUSE_SEC)
 
             # Raise back to transit before rotating to the next pole
             self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_TRANSIT, WRIST_WORK)
