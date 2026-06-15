@@ -158,8 +158,9 @@ class AbacusManipulationNode(Node):
             for i in range(count):
                 self.get_logger().info(f'  Ring {i + 1}/{count}')
 
-                # Raise to receive position — slightly up to pick up the ring
+                # Raise to receive position — hold for 5 s so the ring can be placed
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_RECEIVE, WRIST_WORK)
+                time.sleep(5.0)
 
                 # Lower elbow to working height over the pole
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_WORK, WRIST_WORK)
