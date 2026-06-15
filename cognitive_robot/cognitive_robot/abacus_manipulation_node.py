@@ -35,17 +35,17 @@ WRIST_WORK            =  0.0   # wrist kept level throughout
 ELBOW_TRANSIT         =  0.0   # arm fully upright — safe to rotate between poles
 ELBOW_RECEIVE         = -0.7   # arm slightly raised (~40°) — ring is placed here
 ELBOW_WORK            = -1.57  # elbow 90° forward — hover above pole
-SHOULDER_LIFT_TRANSIT = -1.2   # shoulder dips to slide ring off onto the pole
+SHOULDER_LIFT_TRANSIT = -0.8  # shoulder dips to slide ring off onto the pole
 
 # Seconds the controller has to reach each target position before we move on
 MOVE_SEC = 2
 
 # ── Timing constants (seconds) ────────────────────────────────────────────────
-ARRIVE_WAIT_SEC  = 4.0   # pause after arriving at Station B before starting
-RING_PLACE_SEC   = 4.0   # time at receive position for ring placement
-LOWER_PAUSE_SEC  = 2.5   # pause after lowering to 90° before dipping shoulder
-RELEASE_HOLD_SEC = 4.0   # time held at dipped (release) position
-RETURN_PAUSE_SEC = 2.5   # pause after shoulder returns to working height
+ARRIVE_WAIT_SEC  = 3.0   # pause after arriving at Station B before starting
+RING_PLACE_SEC   = 3.0   # time at receive position for ring placement
+LOWER_PAUSE_SEC  = 1.5   # pause after lowering to 90° before dipping shoulder
+RELEASE_HOLD_SEC = 2.5   # time held at dipped (release) position
+RETURN_PAUSE_SEC = 1.5   # pause after shoulder returns to working height
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Shoulder pan angle for each of the four poles, measured from centre
