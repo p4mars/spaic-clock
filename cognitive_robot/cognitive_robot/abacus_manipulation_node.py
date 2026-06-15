@@ -129,9 +129,9 @@ class AbacusManipulationNode(Node):
             2. Rotate shoulder_pan to the pole's angle while upright.
             3. Lower arm to working height.
             4. Repeat <count> times:
-                a. Raise to receive position (slightly up) — operator places ring.
-                b. Press Enter to confirm.
-                c. Tilt past working height (release) — ring slides off onto pole.
+                a. Raise to receive position (slightly up).
+                b. Lower elbow to working height over the pole.
+                c. Dip shoulder so ring slides off onto the pole.
                 d. Return to working height.
             5. Raise back to transit before moving to next pole.
 
@@ -158,16 +158,13 @@ class AbacusManipulationNode(Node):
             for i in range(count):
                 self.get_logger().info(f'  Ring {i + 1}/{count}')
 
-                # Raise to receive position — slightly up so operator can place ring
+                # Raise to receive position — slightly up to pick up the ring
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_RECEIVE, WRIST_WORK)
 
-                # Wait for operator to place ring and press Enter
-                input('  → Ring geplaatst? Druk Enter om door te gaan...')
-
-                # Lower elbow to working height first
+                # Lower elbow to working height over the pole
                 self._move_arm(pan, SHOULDER_LIFT_WORK, ELBOW_WORK, WRIST_WORK)
 
-                # Then dip shoulder so ring slides off onto the pole
+                # Dip shoulder so ring slides off onto the pole
                 self._move_arm(pan, SHOULDER_LIFT_TRANSIT, ELBOW_WORK, WRIST_WORK)
 
                 # Return shoulder to working position, ready for the next ring

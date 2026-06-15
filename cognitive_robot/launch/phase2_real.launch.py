@@ -137,12 +137,18 @@ def generate_launch_description():
             executable='detect_abacus_service',
             name='detect_abacus_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
         Node(
             package='cognitive_robot',
             executable='detect_station_service',
             name='detect_station_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
         Node(
             package='cognitive_robot',
@@ -152,6 +158,14 @@ def generate_launch_description():
             parameters=[{
                 'camera_topic': '/camera/color/image_raw/compressed',
             }],
+        ),
+
+        # Arm manipulation — service node for placing rings on the abacus at Station B
+        Node(
+            package='cognitive_robot',
+            executable='abacus_manipulation_node',
+            name='abacus_manipulation_node',
+            output='screen',
         ),
 
         # Autonomous mission — waits for 2D pose estimate, then drives Station A → B

@@ -73,12 +73,18 @@ def generate_launch_description():
             executable='detect_abacus_service',
             name='detect_abacus_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
         Node(
             package='cognitive_robot',
             executable='detect_station_service',
             name='detect_station_service',
             output='screen',
+            parameters=[{
+                'camera_topic': '/camera/color/image_raw/compressed',
+            }],
         ),
         Node(
             package='cognitive_robot',

@@ -50,15 +50,17 @@ SERVICE PROVIDED
 import os
 import tempfile
 import threading
+import time
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 from inference_sdk import InferenceHTTPClient
 
@@ -139,8 +141,9 @@ class DetectAbacusService(Node, DepthCameraMixin):
         # service callbacks running in different threads.
 
         camera_topic = self.get_parameter('camera_topic').get_parameter_value().string_value
+        msg_type = CompressedImage if camera_topic.endswith('/compressed') else Image
         self.create_subscription(
-            Image,
+            msg_type,
             camera_topic,
             self._camera_callback,
             qos_profile_sensor_data,
@@ -181,18 +184,11 @@ class DetectAbacusService(Node, DepthCameraMixin):
     # ---------------------------------------------------------------------- #
 
     def _camera_callback(self, msg):
-        """
-        Called automatically by ROS every time a new colour camera frame arrives.
-
-        Converts the ROS Image message to a BGR OpenCV image and stores it
-        in self.latest_frame so the service callback can pick it up later.
-
-        Parameters
-        ----------
-        msg : sensor_msgs.msg.Image
-            The raw image message published by the robot's front camera.
-        """
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        if isinstance(msg, CompressedImage):
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        else:
+            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         with self._frame_lock:
             self.latest_frame = frame
 
@@ -366,19 +362,25 @@ class DetectAbacusService(Node, DepthCameraMixin):
         """
         self.get_logger().info('Received /detect_abacus request.')
 
-        # Step 1: grab the latest colour camera frame.
-        frame = self._capture_frame()
-        if frame is None:
-            self.get_logger().warn('No camera frame available yet — returning confidence=0.0.')
-            response.confidence  = 0.0
-            response.x           = 0
-            response.y           = 0
-            response.bbox_width  = 0
-            response.bbox_height = 0
-            response.distance_m  = 0.0
-            response.x_m         = 0.0
-            response.y_m         = 0.0
-            return response
+        # Step 1: grab the latest colour camera frame, waiting up to 30 s for first frame.
+        wait_start = time.time()
+        while True:
+            frame = self._capture_frame()
+            if frame is not None:
+                break
+            if time.time() - wait_start > 30.0:
+                self.get_logger().error('Camera never became available after 30 s — aborting.')
+                response.confidence  = 0.0
+                response.x           = 0
+                response.y           = 0
+                response.bbox_width  = 0
+                response.bbox_height = 0
+                response.distance_m  = 0.0
+                response.x_m         = 0.0
+                response.y_m         = 0.0
+                return response
+            self.get_logger().info('Waiting for camera frame...')
+            time.sleep(1.0)
 
         # Step 2: save the frame as a temporary JPEG so the API can read it.
         image_path = self._save_temp_image(frame)
