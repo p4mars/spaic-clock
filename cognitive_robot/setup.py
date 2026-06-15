@@ -44,6 +44,15 @@ setup(
 
             # Test caller — calls /detect_abacus once and prints the result.
             'call_detect_abacus = cognitive_robot.call_detect_abacus:main',
+
+            # Phase 2 autonomous mission — navigate to Station A, read clock, go to Station B.
+            'station_demo = cognitive_robot.plan_nav.station_demo:main',
+
+            # Abacus arm manipulation — service node that moves the arm to place rings.
+            'abacus_manipulation_node = cognitive_robot.abacus_manipulation_node:main',
+
+            # Republishes /odom topic as odom→base_link TF (needed when robot's TF is not received over WiFi).
+            'odom_tf_broadcaster = cognitive_robot.plan_nav.odom_tf_broadcaster:main',
         ],
     },
 )

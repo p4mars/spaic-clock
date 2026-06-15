@@ -3,9 +3,9 @@
 # This file is overwritten every time this station is registered.
 
 station_name: "Station A"
-station_file: "/home/mike/station_a_location.yaml"
+station_file: "/home/bas/mirte_ws/src/cognitive-robot/maps/station_a_location.yaml"
 
-created_time: "2026-06-10T12:10:34.145835"
+created_time: "2026-06-15T12:54:38.890356"
 
 marker:
   type: "aruco_depth_service"
@@ -14,34 +14,34 @@ marker:
 
 map_pose:
   frame_id: "map"
-  x: 0.653906
-  y: -0.315419
-  z: 0.170126
-  yaw_from_camera_to_station_rad: -0.682112
-  yaw_from_camera_to_station_deg: -39.082129
+  x: -0.135351
+  y: 1.540445
+  z: 0.196343
+  yaw_from_camera_to_station_rad: 1.307037
+  yaw_from_camera_to_station_deg: 74.887686
 
 destination_pose:
   frame_id: "map"
   description: "Robot navigation goal in front of the station, facing the station"
-  x: 0.032911
-  y: 0.188928
+  x: -0.343921
+  y: 0.768112
   z: 0.000000
-  yaw_rad: -0.682112
-  yaw_deg: -39.082129
+  yaw_rad: 1.307037
+  yaw_deg: 74.887686
   stand_off_distance_m: 0.800000
-  distance_camera_to_station_when_saved_m: 1.084878
+  distance_camera_to_station_when_saved_m: 0.570059
 
 camera_pose_in_map_when_saved:
   frame_id: "map"
-  x: -0.188223
-  y: 0.368525
+  x: -0.283972
+  y: 0.990101
   z: 0.127700
 
 raw_detection_in_camera_frame:
   frame_id: "camera_depth_optical_frame"
-  x: 0.196140
-  y: -0.042426
-  z: 1.067000
-  distance_m: 1.067000
-  yaw_rad: 0.039170
-  yaw_deg: 2.244281
+  x: 0.008184
+  y: -0.068643
+  z: 0.570000
+  distance_m: 0.570000
+  yaw_rad: -0.140296
+  yaw_deg: -8.038392

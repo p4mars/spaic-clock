@@ -11,18 +11,20 @@ from rclpy.action import ActionClient
 
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import PoseWithCovarianceStamped
 
-from cognitive_robot_interfaces.srv import ReadTime, DetectAbacus
+from cognitive_robot_interfaces.srv import ReadTime, DetectAbacus, RunAbacus
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+_MAPS_DIR = os.path.expanduser('~/mirte_ws/src/cognitive-robot/maps')
 
 # --------------------------------------------------------------------------- #
 # Files saved by your station recorder
 # --------------------------------------------------------------------------- #
-STATION_A_FILE = os.path.join(_HERE, "station_a_location.yaml")
-STATION_B_FILE = os.path.join(_HERE, "station_b_location.yaml")
-ABACUS_FILE    = os.path.join(_HERE, "abacus_location.yaml")
+STATION_A_FILENAME = "station_a_location.yaml"
+STATION_B_FILENAME = "station_b_location.yaml"
+ABACUS_FILENAME    = "abacus_location.yaml"
 
 # Service provided by read_time_service.py
 READ_TIME_SERVICE_NAME = "/read_time"
@@ -33,6 +35,15 @@ DETECT_ABACUS_SERVICE_NAME = "/detect_abacus"
 # Maximum time to wait for the /detect_abacus service to appear.
 DETECT_ABACUS_SERVICE_WAIT_TIMEOUT_SEC = 10.0
 
+# Retry parameters for send_goal_and_wait (Nav2 may reject the first goal if
+# the planner is still finishing activation right after the pose estimate is set).
+MAX_GOAL_RETRIES = 30
+GOAL_RETRY_DELAY_SEC = 3.0
+
+# Seconds to wait after the 2D pose estimate is set, giving AMCL time to converge
+# before the first navigation goal is sent.  Increase if WiFi is laggy.
+POSE_SETTLE_SEC = 40.0
+
 # Give the robot/camera a moment to stop vibrating after Nav2 reaches Station A.
 SETTLE_AT_STATION_A_SEC = 1.0
 
@@ -41,7 +52,7 @@ WAIT_BEFORE_STATION_B_SEC = 1.0
 
 # If False, the robot stops at Station A when OCR fails.
 # If True, it still continues to Station B even when the time was not detected.
-CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND = False
+CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND = True
 
 # Maximum time to wait for the /read_time service to appear.
 READ_TIME_SERVICE_WAIT_TIMEOUT_SEC = 20.0
@@ -125,6 +136,17 @@ class StationClockMission(Node):
     def __init__(self):
         super().__init__("station_clock_mission")
 
+        self.declare_parameter('station_dir', _MAPS_DIR)
+        self.station_dir = self.get_parameter('station_dir').get_parameter_value().string_value
+
+        self._initial_pose_received = False
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            '/initialpose',
+            self._on_initial_pose,
+            10,
+        )
+
         self.nav_client = ActionClient(
             self,
             NavigateToPose,
@@ -141,13 +163,41 @@ class StationClockMission(Node):
             DETECT_ABACUS_SERVICE_NAME
         )
 
+        self.run_abacus_client = self.create_client(
+            RunAbacus,
+            '/abacus/run_sequence'
+        )
+
+    # ---------------------------------------------------------------------- #
+    # Initial pose gate
+    # ---------------------------------------------------------------------- #
+
+    def _on_initial_pose(self, msg):
+        if not self._initial_pose_received:
+            self._initial_pose_received = True
+            self.get_logger().info("2D pose estimate received.")
+
+    def wait_for_initial_pose(self):
+        self.get_logger().info(
+            "Waiting for 2D pose estimate — "
+            "click '2D Pose Estimate' in RViz and click on the map where the robot is."
+        )
+        while rclpy.ok() and not self._initial_pose_received:
+            rclpy.spin_once(self, timeout_sec=0.1)
+        self.get_logger().info("Pose set. Starting mission.")
+
     # ---------------------------------------------------------------------- #
     # Nav2 helpers
     # ---------------------------------------------------------------------- #
 
     def wait_for_nav2(self):
         self.get_logger().info("Waiting for Nav2 /navigate_to_pose action server...")
-        self.nav_client.wait_for_server()
+        while rclpy.ok():
+            ready = self.nav_client.wait_for_server(timeout_sec=1.0)
+            rclpy.spin_once(self, timeout_sec=0.0)
+            if ready:
+                break
+            self.get_logger().info("Still waiting for Nav2 action server...")
         self.get_logger().info("Nav2 action server is available.")
 
     def send_goal_and_wait(self, station_goal):
@@ -162,7 +212,6 @@ class StationClockMission(Node):
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = frame_id
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
 
         goal_msg.pose.pose.position.x = x
         goal_msg.pose.pose.position.y = y
@@ -181,20 +230,30 @@ class StationClockMission(Node):
         self.get_logger().info(f"yaw   : {math.degrees(yaw):+.1f} deg")
         self.get_logger().info("=" * 70)
 
-        send_goal_future = self.nav_client.send_goal_async(
-            goal_msg,
-            feedback_callback=self.feedback_callback
-        )
+        goal_handle = None
+        for attempt in range(1, MAX_GOAL_RETRIES + 1):
+            goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+            send_goal_future = self.nav_client.send_goal_async(
+                goal_msg,
+                feedback_callback=self.feedback_callback
+            )
+            rclpy.spin_until_future_complete(self, send_goal_future)
+            goal_handle = send_goal_future.result()
 
-        rclpy.spin_until_future_complete(self, send_goal_future)
-        goal_handle = send_goal_future.result()
+            if goal_handle is not None and goal_handle.accepted:
+                break
 
-        if goal_handle is None:
-            self.get_logger().error("Goal handle is None. Failed to send goal.")
-            return False
-
-        if not goal_handle.accepted:
-            self.get_logger().error(f"Goal to {station_name} was rejected by Nav2.")
+            self.get_logger().warn(
+                f"Goal to {station_name} rejected "
+                f"(attempt {attempt}/{MAX_GOAL_RETRIES}). "
+                f"Retrying in {GOAL_RETRY_DELAY_SEC:.0f} s..."
+            )
+            if attempt < MAX_GOAL_RETRIES:
+                time.sleep(GOAL_RETRY_DELAY_SEC)
+        else:
+            self.get_logger().error(
+                f"Goal to {station_name} rejected after {MAX_GOAL_RETRIES} attempts."
+            )
             return False
 
         self.get_logger().info(f"Goal to {station_name} accepted.")
@@ -323,6 +382,23 @@ class StationClockMission(Node):
 
         return False
 
+    def call_abacus_manipulation(self, time_digits):
+        self.get_logger().info(f"Calling /abacus/run_sequence with digits: {time_digits}")
+
+        if not self.run_abacus_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error("/abacus/run_sequence service not available. Is abacus_manipulation_node running?")
+            return
+
+        request = RunAbacus.Request()
+        request.time_digits = time_digits
+        future = self.run_abacus_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+
+        if future.result() and future.result().success:
+            self.get_logger().info("Abacus manipulation finished successfully.")
+        else:
+            self.get_logger().error("Abacus manipulation failed or returned no result.")
+
     def call_detect_abacus(self):
         self.get_logger().info("Calling /detect_abacus...")
 
@@ -360,25 +436,35 @@ def main(args=None):
     mission = StationClockMission()
 
     try:
-        station_a_goal = load_station_destination(STATION_A_FILE)
+        station_a_file = os.path.join(mission.station_dir, STATION_A_FILENAME)
+        station_b_file = os.path.join(mission.station_dir, STATION_B_FILENAME)
+        abacus_file    = os.path.join(mission.station_dir, ABACUS_FILENAME)
+
+        station_a_goal = load_station_destination(station_a_file)
 
         # Station B destination: prefer abacus detection, fall back to ArUco.
         try:
-            station_b_goal = load_station_destination(ABACUS_FILE)
+            station_b_goal = load_station_destination(abacus_file)
             station_b_source = "abacus detection"
         except (FileNotFoundError, KeyError):
             mission.get_logger().warn(
                 "abacus_location.yaml not found or missing destination_pose. "
                 "Falling back to station_b_location.yaml."
             )
-            station_b_goal = load_station_destination(STATION_B_FILE)
+            station_b_goal = load_station_destination(station_b_file)
             station_b_source = "ArUco station detection (fallback)"
 
         mission.get_logger().info("Loaded station destination files:")
-        mission.get_logger().info(f"  Station A : {STATION_A_FILE}")
+        mission.get_logger().info(f"  Station A : {station_a_file}")
         mission.get_logger().info(f"  Station B : {station_b_source}")
 
         mission.wait_for_nav2()
+        mission.wait_for_initial_pose()
+
+        mission.get_logger().info(
+            f"Waiting {POSE_SETTLE_SEC:.0f} s for AMCL to converge before navigating..."
+        )
+        time.sleep(POSE_SETTLE_SEC)
 
         if not mission.wait_for_read_time_service():
             return
@@ -403,6 +489,10 @@ def main(args=None):
 
         time_found, time_digits = mission.call_read_time()
 
+        if not time_found:
+            mission.get_logger().warn("Clock not detected, defaulting to [1, 2, 0, 1] (12:01).")
+            time_digits = [1, 2, 0, 1]
+
         if not time_found and not CONTINUE_TO_STATION_B_IF_TIME_NOT_FOUND:
             mission.get_logger().error(
                 "Clock detection failed. Stopping mission. "
@@ -422,7 +512,11 @@ def main(args=None):
             mission.get_logger().error("Failed to reach Station B.")
             return
 
-        # 4. Confirm abacus at Station B.
+        # 4. Run abacus arm manipulation with the detected time.
+        mission.get_logger().info(f"Starting abacus manipulation with digits: {time_digits}")
+        mission.call_abacus_manipulation(time_digits)
+
+        # 5. Confirm abacus at Station B.
         abacus_found, _ = mission.call_detect_abacus()
 
         if not abacus_found:
