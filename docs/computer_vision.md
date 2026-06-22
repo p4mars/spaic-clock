@@ -5,7 +5,7 @@
 # Computer Vision — Command Reference
 
 ---
-3
+
 ## 0. First-Time Setup
 
 Install the required Python packages (only needed once):
@@ -153,4 +153,49 @@ ros2 service call /read_time cognitive_robot_interfaces/srv/ReadTime
 cd ~/mirte_ws
 colcon build --packages-select cognitive_robot
 source install/setup.bash
+```
+
+---
+
+## 3. `/read_time` service — how it works & tuning
+
+When the mission node calls `/read_time`, the service grabs a front-camera frame
+and runs EasyOCR looking for an `NN:NN` time. If nothing valid is found it rotates
+the robot slightly (alternating left/right with increasing angles) and retries,
+until it reads a time or runs out of attempts. It returns `found=True` + four
+digits (e.g. `[1,4,3,2]` for `14:32`), or `found=False`.
+
+OCR runs on the **laptop**, not the robot — the EasyOCR model (~200 MB) is too
+heavy for the robot's CPU. The robot only supplies the camera stream and executes
+rotation commands.
+
+### Tunable parameters
+
+Pass at launch with `--ros-args -p name:=value`:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `confidence_threshold` | `0.1` | Min OCR confidence to accept a reading. Raise if you get wrong times; lower if valid times are rejected. |
+| `step_degrees` | `10` | Degrees added per scan iteration (0°, ±10°, ±20°…). |
+| `max_iterations` | `10` | Max scan attempts before giving up. |
+| `rotation_speed` | `0.5` | Rotation speed (rad/s). |
+| `debug_save_dir` | `~/ocr_debug` | Where debug images are saved (laptop). |
+| `camera_topic` | `/camera/color/image_raw` | Camera to read. Gazebo: `/camera/image_raw`. |
+| `cmd_vel_topic` | `/mirte_base_controller/cmd_vel` | Rotation-command topic. Gazebo: `/cmd_vel`. |
+
+### Debug images
+
+Each scan attempt writes a pair of files into `debug_save_dir`:
+`attempt_<timestamp>_iter<N>.jpg` (the camera frame) and `.txt` (the OCR
+detections with confidence and accept/reject verdict). Inspect these to see why a
+read succeeded or failed.
+
+### Collecting test photos
+
+`make_photo_for_testing_algorithm` saves front-camera frames on demand for offline
+OCR testing (not part of the live pipeline):
+
+```bash
+ros2 run cognitive_robot make_photo_for_testing_algorithm
+# Press Enter to save a frame, type 'q' to quit. Saved to ~/photos/
 ```

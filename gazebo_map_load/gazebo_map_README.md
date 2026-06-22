@@ -1,0 +1,1 @@
+This folder holds the objects that are loaded into the gazebo map to represent the actual demo-day playground.

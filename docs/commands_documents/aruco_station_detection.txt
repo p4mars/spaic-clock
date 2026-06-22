@@ -104,9 +104,9 @@ Marker ID 0  ->  Station A
 Marker ID 1  ->  Station B
 
 Markers were generated with:
-    local_script_tests/aruro/aruro_make_photos.py
+    testing_only/aruro/aruro_make_photos.py
     Dictionary: DICT_6X6_250
-    Images in:  local_script_tests/aruro/aruro_codes/
+    Images in:  docs/aruco_markers/
 
 Print the markers and attach them at the stations. The physical size of the
 printed marker must match MARKER_LENGTH_METERS in detect_station_service.py
