@@ -50,15 +50,17 @@ SERVICE PROVIDED
 import os
 import tempfile
 import threading
+import time
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 from inference_sdk import InferenceHTTPClient
 
@@ -139,8 +141,9 @@ class DetectAbacusService(Node, DepthCameraMixin):
         # service callbacks running in different threads.
 
         camera_topic = self.get_parameter('camera_topic').get_parameter_value().string_value
+        msg_type = CompressedImage if camera_topic.endswith('/compressed') else Image
         self.create_subscription(
-            Image,
+            msg_type,
             camera_topic,
             self._camera_callback,
             qos_profile_sensor_data,
@@ -155,6 +158,10 @@ class DetectAbacusService(Node, DepthCameraMixin):
         depth_topic       = self.get_parameter('depth_topic').get_parameter_value().string_value
         camera_info_topic = self.get_parameter('camera_info_topic').get_parameter_value().string_value
         self._setup_depth_subscriptions(self._cb_group, depth_topic, camera_info_topic)
+        # Lazy depth: stop the continuous RAW depth stream immediately. It is
+        # re-subscribed only while handling a /detect_abacus request (Station B),
+        # so it never starves the colour camera (e.g. read_time at Station A).
+        self._stop_depth_subscriptions()
 
         # ------------------------------------------------------------------ #
         # Roboflow inference client                                            #
@@ -181,18 +188,11 @@ class DetectAbacusService(Node, DepthCameraMixin):
     # ---------------------------------------------------------------------- #
 
     def _camera_callback(self, msg):
-        """
-        Called automatically by ROS every time a new colour camera frame arrives.
-
-        Converts the ROS Image message to a BGR OpenCV image and stores it
-        in self.latest_frame so the service callback can pick it up later.
-
-        Parameters
-        ----------
-        msg : sensor_msgs.msg.Image
-            The raw image message published by the robot's front camera.
-        """
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        if isinstance(msg, CompressedImage):
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        else:
+            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         with self._frame_lock:
             self.latest_frame = frame
 
@@ -366,19 +366,25 @@ class DetectAbacusService(Node, DepthCameraMixin):
         """
         self.get_logger().info('Received /detect_abacus request.')
 
-        # Step 1: grab the latest colour camera frame.
-        frame = self._capture_frame()
-        if frame is None:
-            self.get_logger().warn('No camera frame available yet — returning confidence=0.0.')
-            response.confidence  = 0.0
-            response.x           = 0
-            response.y           = 0
-            response.bbox_width  = 0
-            response.bbox_height = 0
-            response.distance_m  = 0.0
-            response.x_m         = 0.0
-            response.y_m         = 0.0
-            return response
+        # Step 1: grab the latest colour camera frame, waiting up to 30 s for first frame.
+        wait_start = time.time()
+        while True:
+            frame = self._capture_frame()
+            if frame is not None:
+                break
+            if time.time() - wait_start > 30.0:
+                self.get_logger().error('Camera never became available after 30 s — aborting.')
+                response.confidence  = 0.0
+                response.x           = 0
+                response.y           = 0
+                response.bbox_width  = 0
+                response.bbox_height = 0
+                response.distance_m  = 0.0
+                response.x_m         = 0.0
+                response.y_m         = 0.0
+                return response
+            self.get_logger().info('Waiting for camera frame...')
+            time.sleep(1.0)
 
         # Step 2: save the frame as a temporary JPEG so the API can read it.
         image_path = self._save_temp_image(frame)
@@ -403,37 +409,50 @@ class DetectAbacusService(Node, DepthCameraMixin):
             return response
 
         # Step 5 & 6: measure depth at the detection centre (via DepthCameraMixin).
-        depth_frame = self._capture_depth_frame()
-        if depth_frame is None:
-            self.get_logger().warn('No depth frame available — distance not measured.')
+        # Lazy depth: subscribe now (depth was NOT streaming during the rest of the
+        # mission, to keep the colour camera alive), wait briefly for a depth frame,
+        # then tear the subscription down again in `finally`.
+        self._start_depth_subscriptions()
+        try:
+            depth_wait_start = time.time()
+            depth_frame = self._capture_depth_frame()
+            while depth_frame is None and time.time() - depth_wait_start < 10.0:
+                self.get_logger().info('Waiting for depth frame...')
+                time.sleep(0.5)
+                depth_frame = self._capture_depth_frame()
+
+            if depth_frame is None:
+                self.get_logger().warn('No depth frame available — distance not measured.')
+                return response
+
+            # Roboflow ran on a 320x240 resized image, so its pixel coordinates are in
+            # that reduced space. The depth image is the original camera resolution.
+            # Scale back so depth sampling and 3D projection use the correct pixel.
+            scale_x = frame.shape[1] / 320.0
+            scale_y = frame.shape[0] / 240.0
+            depth_x = int(x * scale_x)
+            depth_y = int(y * scale_y)
+
+            response.distance_m = self._sample_depth(depth_frame, depth_x, depth_y, radius=30)
+
+            # Step 7: calculate real-world 3D position (via DepthCameraMixin).
+            response.x_m, response.y_m, _ = self._project_to_3d(depth_x, depth_y, response.distance_m)
+
+            # Step 8: save debug depth images.
+            self._save_depth_image(
+                depth_frame, depth_x, depth_y,
+                int(bbox_width * scale_x), int(bbox_height * scale_y),
+                label='abacus',
+            )
+
+            self.get_logger().info(
+                f'Result — confidence={confidence:.2f}, pixel=({x},{y}), '
+                f'distance={response.distance_m:.2f}m, '
+                f'position=({response.x_m:.2f}m, {response.y_m:.2f}m)'
+            )
             return response
-
-        # Roboflow ran on a 320x240 resized image, so its pixel coordinates are in
-        # that reduced space. The depth image is the original camera resolution.
-        # Scale back so depth sampling and 3D projection use the correct pixel.
-        scale_x = frame.shape[1] / 320.0
-        scale_y = frame.shape[0] / 240.0
-        depth_x = int(x * scale_x)
-        depth_y = int(y * scale_y)
-
-        response.distance_m = self._sample_depth(depth_frame, depth_x, depth_y, radius=30)
-
-        # Step 7: calculate real-world 3D position (via DepthCameraMixin).
-        response.x_m, response.y_m, _ = self._project_to_3d(depth_x, depth_y, response.distance_m)
-
-        # Step 8: save debug depth images.
-        self._save_depth_image(
-            depth_frame, depth_x, depth_y,
-            int(bbox_width * scale_x), int(bbox_height * scale_y),
-            label='abacus',
-        )
-
-        self.get_logger().info(
-            f'Result — confidence={confidence:.2f}, pixel=({x},{y}), '
-            f'distance={response.distance_m:.2f}m, '
-            f'position=({response.x_m:.2f}m, {response.y_m:.2f}m)'
-        )
-        return response
+        finally:
+            self._stop_depth_subscriptions()
 
 
 # --------------------------------------------------------------------------- #

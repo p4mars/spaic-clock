@@ -88,6 +88,10 @@ Saved files go to: `~/mirte_ws/src/cognitive-robot/maps/`
 - SSH into the robot:
   ```bash
   ssh mirte@172.20.10.4
+  or
+  ssh mirte@10.121.167.158
+  or
+  ssh ..
   # password: mirte_mirte
   ```
 - Set domain ID (do this in **every** terminal for real robot):
@@ -175,3 +179,28 @@ ros2 launch cognitive_robot phase2_real.launch.py
 > ros2 launch cognitive_robot demo.launch.py
 > ros2 run cognitive_robot station_demo
 > ```
+
+---
+
+## Troubleshooting
+
+### Clear stale ROS 2 processes between runs
+
+If a launch behaves strangely after you've stopped a previous one with Ctrl-C — e.g. nodes
+that seem to hang at startup, duplicated nodes, topics/services that don't respond, or a leftover
+RViz window — there are probably orphaned processes from the previous launch still running. ROS 2
+does not always shut everything down cleanly on Ctrl-C, and the leftovers cause name clashes and
+communication (DDS) contention with the new launch.
+
+Fix — run this on the **LAPTOP only**, then relaunch:
+
+```bash
+pkill -f ros2; pkill -f nav2; pkill -f rviz
+# wait ~3 s, then confirm nothing is left:
+ros2 node list      # should print nothing (or error) when everything is dead
+```
+
+> ⚠️ **Do NOT run this on the robot.** It would kill the robot's own ROS stack (base
+> controller, lidar, camera drivers). It is only for clearing the laptop-side nodes that
+> the integration launch files start. If you also have an SSH terminal into the robot open,
+> double-check you are in a laptop terminal first (`hostname` → laptop, not the Mirte).

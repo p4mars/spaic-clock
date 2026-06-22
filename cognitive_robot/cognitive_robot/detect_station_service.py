@@ -67,6 +67,7 @@ SERVICE PROVIDED
 
 import os
 import threading
+import time
 from datetime import datetime
 
 import cv2
@@ -78,7 +79,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 from cognitive_robot_interfaces.srv import DetectStation
 from cognitive_robot.depth_utils import DepthCameraMixin
@@ -340,8 +341,9 @@ class DetectStationService(Node, DepthCameraMixin):
         # service callbacks running in different threads.
 
         camera_topic = self.get_parameter('camera_topic').get_parameter_value().string_value
+        msg_type = CompressedImage if camera_topic.endswith('/compressed') else Image
         self.create_subscription(
-            Image,
+            msg_type,
             camera_topic,
             self._camera_callback,
             qos_profile_sensor_data,
@@ -373,14 +375,11 @@ class DetectStationService(Node, DepthCameraMixin):
     # ---------------------------------------------------------------------- #
 
     def _camera_callback(self, msg):
-        """
-        Called automatically by ROS every time a new colour camera frame arrives.
-
-        Parameters
-        ----------
-        msg : sensor_msgs.msg.Image
-        """
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        if isinstance(msg, CompressedImage):
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        else:
+            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         with self._frame_lock:
             self.latest_frame = frame
 
@@ -481,11 +480,17 @@ class DetectStationService(Node, DepthCameraMixin):
             response.yaw          = 0.0
             return response
 
-        # Step 1: grab the latest colour frame.
-        frame = self._capture_frame()
-        if frame is None:
-            self.get_logger().warn('No camera frame available yet.')
-            return _empty_response()
+        # Step 1: grab the latest colour frame, waiting up to 30 s for first frame.
+        wait_start = time.time()
+        while True:
+            frame = self._capture_frame()
+            if frame is not None:
+                break
+            if time.time() - wait_start > 30.0:
+                self.get_logger().error('Camera never became available after 30 s — aborting.')
+                return _empty_response()
+            self.get_logger().info('Waiting for camera frame...')
+            time.sleep(1.0)
 
         # Step 2: build the camera matrix for solvePnP (yaw only).
         camera_matrix, dist_coeffs = self._build_camera_matrix()

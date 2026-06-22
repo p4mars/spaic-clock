@@ -12,6 +12,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
+from rclpy.time import Time
 
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
@@ -100,6 +101,20 @@ def yaw_from_xy(dx, dy):
 
 def normalize_angle(angle):
     return math.atan2(math.sin(angle), math.cos(angle))
+
+
+MAX_TF_AGE_SEC = 3.0
+
+
+def check_transform_age(transform):
+    tf_sec = transform.header.stamp.sec + transform.header.stamp.nanosec * 1e-9
+    now_sec = time.time()
+    age = now_sec - tf_sec
+    if age > MAX_TF_AGE_SEC:
+        raise RuntimeError(
+            f"TF transform is {age:.1f}s old (max {MAX_TF_AGE_SEC}s). "
+            f"Is SLAM still running?"
+        )
 
 
 def compute_destination_pose(station_point, camera_origin_in_map, station_name):
@@ -639,7 +654,7 @@ class TrialDepthMapper(Node):
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 self.camera_frame,
-                self.get_clock().now(),
+                Time(),
                 timeout=Duration(seconds=2.0)
             )
         except Exception as e:
@@ -647,6 +662,14 @@ class TrialDepthMapper(Node):
             print(f"  {e}")
             print("=" * 80)
             self.status_text = "Abacus TF transform failed."
+            return
+
+        try:
+            check_transform_age(transform)
+        except RuntimeError as e:
+            print(f"TF transform stale: {e}")
+            print("=" * 80)
+            self.status_text = "TF transform stale. Is SLAM running?"
             return
 
         abacus_point_map = transform_point_with_tf(camera_point, transform)
@@ -745,10 +768,9 @@ raw_detection_in_camera_frame:
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 self.camera_frame,
-                self.get_clock().now(),
+                Time(),
                 timeout=Duration(seconds=2.0)
             )
-
         except Exception as e:
             print("Failed to get TF transform:")
             print(f"  target frame: {self.map_frame}")
@@ -759,8 +781,15 @@ raw_detection_in_camera_frame:
             print("Check:")
             print(f"  ros2 run tf2_ros tf2_echo {self.map_frame} {self.camera_frame}")
             print("=" * 80)
-
             self.status_text = "TF transform failed."
+            return
+
+        try:
+            check_transform_age(transform)
+        except RuntimeError as e:
+            print(f"TF transform stale: {e}")
+            print("=" * 80)
+            self.status_text = "TF transform stale. Is SLAM running?"
             return
 
         station_point_map = transform_point_with_tf(camera_point, transform)
@@ -898,7 +927,10 @@ raw_detection_in_camera_frame:
             "nav2_map_server",
             "map_saver_cli",
             "-f",
-            map_base
+            map_base,
+            "--ros-args",
+            "-p", "use_sim_time:=true",
+            "-p", "save_map_timeout:=10.0",
         ]
 
         try:
@@ -907,7 +939,7 @@ raw_detection_in_camera_frame:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=20
+                timeout=30
             )
 
             if result.stdout:
@@ -971,7 +1003,7 @@ def main(args=None):
 
     try:
         while rclpy.ok():
-            rclpy.spin_once(node, timeout_sec=0.05)
+            rclpy.spin_once(node, timeout_sec=0.01)
 
     except KeyboardInterrupt:
         pass
