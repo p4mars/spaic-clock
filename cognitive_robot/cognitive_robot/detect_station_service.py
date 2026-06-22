@@ -358,6 +358,7 @@ class DetectStationService(Node, DepthCameraMixin):
         depth_topic       = self.get_parameter('depth_topic').get_parameter_value().string_value
         camera_info_topic = self.get_parameter('camera_info_topic').get_parameter_value().string_value
         self._setup_depth_subscriptions(self._cb_group, depth_topic, camera_info_topic)
+        self._start_depth_subscriptions()
 
         # ------------------------------------------------------------------ #
         # Service server                                                       #

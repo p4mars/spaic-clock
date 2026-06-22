@@ -158,10 +158,6 @@ class DetectAbacusService(Node, DepthCameraMixin):
         depth_topic       = self.get_parameter('depth_topic').get_parameter_value().string_value
         camera_info_topic = self.get_parameter('camera_info_topic').get_parameter_value().string_value
         self._setup_depth_subscriptions(self._cb_group, depth_topic, camera_info_topic)
-        # Lazy depth: stop the continuous RAW depth stream immediately. It is
-        # re-subscribed only while handling a /detect_abacus request (Station B),
-        # so it never starves the colour camera (e.g. read_time at Station A).
-        self._stop_depth_subscriptions()
 
         # ------------------------------------------------------------------ #
         # Roboflow inference client                                            #

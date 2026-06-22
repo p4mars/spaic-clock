@@ -105,8 +105,6 @@ class DepthCameraMixin:
         self._depth_sub = None
         self._camera_info_sub = None
 
-        self._start_depth_subscriptions()
-
     def _start_depth_subscriptions(self):
         """Create the depth + camera_info subscriptions if not already active."""
         if getattr(self, '_depth_sub', None) is None:
