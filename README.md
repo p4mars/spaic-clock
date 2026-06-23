@@ -61,6 +61,21 @@ source install/setup.bash
 
 ---
 
+## Division of work
+
+| Component | File(s) | Owner |
+|-----------|---------|-------|
+| Abacus manipulation | `abacus_manipulation_node.py` | Mike |
+| Depth utilities | `depth_utils.py` | Mike |
+| Abacus detection | `detect_abacus_service.py` | Mike |
+| Station detection | `detect_station_service.py` | Mike |
+| Clock OCR | `read_time_service.py` | Mike |
+| Mission orchestration | `plan_nav/station_demo.py` | |
+| SLAM & Nav2 | `config/`, launch files | |
+| Gazebo simulation | `gazebo_map_load/` | |
+
+---
+
 ## Team notes
 
 <!--
@@ -69,3 +84,6 @@ Keep the tables above in sync when you add or rename a folder.
 -->
 
 _(add notes here)_
+
+---
+
