@@ -72,7 +72,7 @@ source install/setup.bash
 | Clock OCR                     | `read_time_service.py`                                                                                     | Mike  |
 | Mapping & station recognition | `plan_nav`, `trial_depth.py`                                                                               | Ethan |
 | Mission orchestration         | `plan_nav`, `station_demo.py`                                                                              | Ethan |
-| SLAM                          | `config/`                                                                                                  | Bas   |
+| SLAM & Nav2                   | `config/`                                                                                                  | Bas   |
 | Integration Gazebo & Robot    | `phase1_gazebo.launch.py`, `phase2_gazebo.launch.py` <br/> `phase1_real.launch.py`, `phase2_real.launch.py` | Bas |
 | Gazebo demo map               | `gazebo_map_load/`                                                                                         | Ethan |
 
